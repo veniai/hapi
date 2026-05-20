@@ -36,7 +36,6 @@ function createApp(opts: {
         sendMessage,
         cancelQueuedMessage: async () => ({ status: 'cancelled' }),
         getMessagesPage: () => ({ messages: [], page: {} }),
-        getMessagesPageByPosition: () => ({ messages: [], page: {} }),
     } as unknown as SyncEngine
 
     const app = new Hono<WebAppEnv>()

@@ -93,9 +93,8 @@ export type MessagesResponse = {
     messages: DecryptedMessage[]
     page: {
         limit: number
-        beforeSeq?: number | null
         nextBeforeSeq: number | null
-        nextBeforeAt?: number | null
+        nextBeforeAt: number | null
         hasMore: boolean
     }
 }

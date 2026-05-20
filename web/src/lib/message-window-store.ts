@@ -453,14 +453,8 @@ function countRegularMessages(messages: DecryptedMessage[]): number {
     return count
 }
 
-function hasV8Cursor(response: MessagesResponse): boolean {
-    return response.page.nextBeforeAt !== undefined
-        && response.page.nextBeforeAt !== null
-        && response.page.nextBeforeSeq !== null
-}
-
 function sameCursor(a: MessagesResponse, b: MessagesResponse): boolean {
-    return (a.page.nextBeforeAt ?? null) === (b.page.nextBeforeAt ?? null)
+    return a.page.nextBeforeAt === b.page.nextBeforeAt
         && a.page.nextBeforeSeq === b.page.nextBeforeSeq
 }
 
@@ -484,17 +478,13 @@ async function backfillColdLoadMessages(
         }
         if (combined.page.nextBeforeSeq === null) break
 
-        const older = hasV8Cursor(combined)
-            ? await api.getMessages(sessionId, {
-                byPosition: true,
-                beforeAt: combined.page.nextBeforeAt!,
-                beforeSeq: combined.page.nextBeforeSeq,
-                limit: COLD_LOAD_BACKFILL_PAGE_SIZE
-            })
-            : await api.getMessages(sessionId, {
-                beforeSeq: combined.page.nextBeforeSeq,
-                limit: COLD_LOAD_BACKFILL_PAGE_SIZE
-            })
+        if (combined.page.nextBeforeAt === null) break
+
+        const older = await api.getMessages(sessionId, {
+            beforeAt: combined.page.nextBeforeAt,
+            beforeSeq: combined.page.nextBeforeSeq,
+            limit: COLD_LOAD_BACKFILL_PAGE_SIZE
+        })
 
         if (isCurrent && !isCurrent()) {
             return combined
@@ -774,10 +764,7 @@ export async function fetchLatestMessages(api: ApiClient, sessionId: string): Pr
     const generation = beginAsyncGeneration(sessionId, 'latest', { isLoading: true, warning: null })
 
     try {
-        // Always request byPosition mode (V8). If the hub is V7 it ignores byPosition and
-        // returns the standard seq-based response (no nextBeforeAt field) — we fall back
-        // to seq-cursor mode seamlessly.
-        const firstResponse = await api.getMessages(sessionId, { byPosition: true, limit: PAGE_SIZE })
+        const firstResponse = await api.getMessages(sessionId, { limit: PAGE_SIZE })
         const response = initial.atBottom
             ? await backfillColdLoadMessages(api, sessionId, firstResponse, () => isCurrentGeneration(sessionId, 'latest', generation))
             : firstResponse
@@ -787,9 +774,8 @@ export async function fetchLatestMessages(api: ApiClient, sessionId: string): Pr
         // Derive composite cursor pair from server response. Both values come from
         // the same row on the server; we keep them paired so the next older fetch
         // doesn't mix `beforeAt` from the server with a recomputed minimum `seq`.
-        const nextBeforeAt = response.page.nextBeforeAt ?? null
-        const nextBeforeSeq = response.page.nextBeforeSeq ?? null
-        const isV8Cursor = nextBeforeAt !== null && nextBeforeSeq !== null
+        const nextBeforeAt = response.page.nextBeforeAt
+        const nextBeforeSeq = response.page.nextBeforeSeq
 
         updateStateForGeneration(sessionId, 'latest', generation, (prev) => {
             if (prev.atBottom) {
@@ -802,8 +788,8 @@ export async function fetchLatestMessages(api: ApiClient, sessionId: string): Pr
                     pendingVisibleCount: 0,
                     pendingOverflowVisibleCount: 0,
                     hasMore: response.page.hasMore,
-                    oldestPositionAt: isV8Cursor ? nextBeforeAt : null,
-                    oldestPositionSeq: isV8Cursor ? nextBeforeSeq : null,
+                    oldestPositionAt: nextBeforeAt,
+                    oldestPositionSeq: nextBeforeSeq,
                     isLoading: false,
                     warning: null,
                 })
@@ -814,12 +800,11 @@ export async function fetchLatestMessages(api: ApiClient, sessionId: string): Pr
                 pendingVisibleCount: pendingResult.pendingVisibleCount,
                 pendingOverflowCount: pendingResult.pendingOverflowCount,
                 pendingOverflowVisibleCount: pendingResult.pendingOverflowVisibleCount,
-                // Persist the V8 cursor pair on the non-at-bottom path too. Without this
-                // a refresh while scrolled up dropped the composite cursor and the next
-                // loadMore fell back to V7 seq mode against a V8 hub — the same
-                // asymmetric class of bug the at-bottom branch already guards against.
-                oldestPositionAt: isV8Cursor ? nextBeforeAt : null,
-                oldestPositionSeq: isV8Cursor ? nextBeforeSeq : null,
+                // Persist the cursor pair on the non-at-bottom path too. Without this
+                // a refresh while scrolled up drops the composite cursor and prevents
+                // the next older-page load.
+                oldestPositionAt: nextBeforeAt,
+                oldestPositionSeq: nextBeforeSeq,
                 isLoading: false,
                 warning: pendingResult.warning,
             })
@@ -838,28 +823,20 @@ export async function fetchOlderMessages(api: ApiClient, sessionId: string): Pro
     if (initial.isLoadingMore || !initial.hasMore) {
         return
     }
-    if (initial.oldestSeq === null) {
+    if (initial.oldestPositionAt === null || initial.oldestPositionSeq === null) {
         return
     }
     const generation = beginAsyncGeneration(sessionId, 'older', { isLoadingMore: true })
 
     try {
-        // V8 mode: use the server-provided cursor pair as-is. Mixing `beforeAt` from
-        // the server with a recomputed minimum `seq` from the local window can refer
-        // to different rows after a low-seq message is invoked late.
-        const useV8Cursor = initial.oldestPositionAt !== null && initial.oldestPositionSeq !== null
-        const response = useV8Cursor
-            ? await api.getMessages(sessionId, {
-                byPosition: true,
-                beforeAt: initial.oldestPositionAt!,
-                beforeSeq: initial.oldestPositionSeq!,
-                limit: PAGE_SIZE
-            })
-            : await api.getMessages(sessionId, { beforeSeq: initial.oldestSeq, limit: PAGE_SIZE })
+        const response = await api.getMessages(sessionId, {
+            beforeAt: initial.oldestPositionAt,
+            beforeSeq: initial.oldestPositionSeq,
+            limit: PAGE_SIZE
+        })
 
-        const nextBeforeAt = response.page.nextBeforeAt ?? null
-        const nextBeforeSeq = response.page.nextBeforeSeq ?? null
-        const isV8Cursor = nextBeforeAt !== null && nextBeforeSeq !== null
+        const nextBeforeAt = response.page.nextBeforeAt
+        const nextBeforeSeq = response.page.nextBeforeSeq
 
         updateStateForGeneration(sessionId, 'older', generation, (prev) => {
             const merged = mergeMessages(response.messages, prev.messages)
@@ -867,8 +844,8 @@ export async function fetchOlderMessages(api: ApiClient, sessionId: string): Pro
             return buildState(prev, {
                 messages: trimmed,
                 hasMore: response.page.hasMore,
-                oldestPositionAt: isV8Cursor ? nextBeforeAt : null,
-                oldestPositionSeq: isV8Cursor ? nextBeforeSeq : null,
+                oldestPositionAt: nextBeforeAt,
+                oldestPositionSeq: nextBeforeSeq,
                 isLoadingMore: false,
             })
         })
@@ -1032,14 +1009,11 @@ export function removeOptimisticMessage(sessionId: string, localId: string): voi
 /** Transition the queued messages whose localIds match to 'sent' and record invokedAt.
  *  Driven by the CLI ack (messages-consumed). Unmatched messages remain queued.
  *  Also handles server-loaded messages (status=undefined) that have a matching localId.
- *  V7 hub compat: if `invokedAt` is undefined the SyncEvent had no server timestamp,
- *  so we fall back to client time — without it the row would stay queued forever
- *  under the strict-null filter. The fallback only affects display ordering on
- *  this client; the persisted server value is the authoritative one when present. */
-export function markMessagesConsumed(sessionId: string, localIds: string[], invokedAt: number | undefined): void {
+ *  `invokedAt` is provided by the hub and used as the stable display-position
+ *  timestamp for composite cursor pagination. */
+export function markMessagesConsumed(sessionId: string, localIds: string[], invokedAt: number): void {
     if (localIds.length === 0) return
     const idSet = new Set(localIds)
-    const effectiveInvokedAt = invokedAt ?? Date.now()
     updateState(sessionId, (prev) => {
         let changed = false
         const updateList = (list: DecryptedMessage[]) => {
@@ -1059,8 +1033,7 @@ export function markMessagesConsumed(sessionId: string, localIds: string[], invo
                 // DB still holds the original timestamp.
                 const needsStatus = message.status !== 'sent'
                 // Strict null to stay consistent with isQueuedForInvocation and the rest
-                // of this file. The idSet filter already shields V7-stamped rows from
-                // this path, but the strict-null contract should not vary by call site.
+                // of this file.
                 const needsInvokedAt = message.invokedAt === null
                 if (!needsStatus && !needsInvokedAt) {
                     return message
@@ -1071,7 +1044,7 @@ export function markMessagesConsumed(sessionId: string, localIds: string[], invo
                     update.status = 'sent' as MessageStatus
                 }
                 if (needsInvokedAt) {
-                    update.invokedAt = effectiveInvokedAt
+                    update.invokedAt = invokedAt
                 }
                 return { ...message, ...update }
             })
@@ -1081,7 +1054,7 @@ export function markMessagesConsumed(sessionId: string, localIds: string[], invo
         // sees their own message at the invocation slot — it stays in the
         // pending bucket until they scroll, even though the floating bar
         // already cleared.  Identifying the migrated rows by (localId,
-        // invokedAt = effectiveInvokedAt) ensures we only move rows whose
+        // invokedAt = invokedAt) ensures we only move rows whose
         // ack just arrived, not unrelated pending entries.
         const updatedPending = updateList(prev.pending)
         const consumedFromPending: DecryptedMessage[] = []
@@ -1089,7 +1062,7 @@ export function markMessagesConsumed(sessionId: string, localIds: string[], invo
             if (
                 message.localId &&
                 idSet.has(message.localId) &&
-                message.invokedAt === effectiveInvokedAt
+                message.invokedAt === invokedAt
             ) {
                 consumedFromPending.push(message)
                 return false

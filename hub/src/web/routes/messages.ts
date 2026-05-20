@@ -8,8 +8,10 @@ import { requireSessionFromParam, requireSyncEngine } from './guards'
 const querySchema = z.object({
     limit: z.coerce.number().int().min(1).max(200).optional(),
     beforeSeq: z.coerce.number().int().min(1).optional(),
-    byPosition: z.string().optional(),
     beforeAt: z.coerce.number().int().min(0).optional(),
+}).refine((data) => (data.beforeAt === undefined) === (data.beforeSeq === undefined), {
+    message: 'beforeAt and beforeSeq must be provided together',
+    path: ['beforeAt'],
 })
 
 const sendMessageBodySchema = z.object({
@@ -56,21 +58,15 @@ export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Ho
         const sessionId = sessionResult.sessionId
 
         const parsed = querySchema.safeParse(c.req.query())
-        const limit = parsed.success ? (parsed.data.limit ?? 50) : 50
-
-        // V8 byPosition mode: use composite (position_at, seq) cursor
-        if (parsed.success && parsed.data.byPosition === '1') {
-            const beforeAt = parsed.data.beforeAt
-            const beforeSeq = parsed.data.beforeSeq
-            const before = (beforeAt !== undefined && beforeSeq !== undefined)
-                ? { at: beforeAt, seq: beforeSeq }
-                : null
-            return c.json(engine.getMessagesPageByPosition(sessionId, { limit, before }))
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid query', issues: parsed.error.flatten() }, 400)
         }
 
-        // V7-compatible path: seq-based cursor
-        const beforeSeq = parsed.success ? (parsed.data.beforeSeq ?? null) : null
-        return c.json(engine.getMessagesPage(sessionId, { limit, beforeSeq }))
+        const limit = parsed.data.limit ?? 50
+        const before = parsed.data.beforeAt !== undefined && parsed.data.beforeSeq !== undefined
+            ? { at: parsed.data.beforeAt, seq: parsed.data.beforeSeq }
+            : null
+        return c.json(engine.getMessagesPage(sessionId, { limit, before }))
     })
 
     app.delete('/sessions/:id/messages/:messageId', async (c) => {

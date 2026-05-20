@@ -204,10 +204,3 @@ export function getConfiguration(): Configuration {
     }
     return _configuration
 }
-
-// For compatibility - throws on access if not configured
-export const configuration = new Proxy({} as Configuration, {
-    get(_, prop) {
-        return getConfiguration()[prop as keyof Configuration]
-    }
-})

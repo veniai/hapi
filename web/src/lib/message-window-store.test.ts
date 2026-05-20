@@ -292,9 +292,9 @@ describe('message-window-store async generations', () => {
             startCreatedAt: 1_700_000_200_000,
         })
         const olderRequest = deferred<Awaited<ReturnType<ApiClient['getMessages']>>>()
-        const callLog: Array<{ beforeAt?: number | null; beforeSeq?: number | null; byPosition?: boolean; limit?: number }> = []
+        const callLog: Array<{ beforeAt?: number | null; beforeSeq?: number | null; limit?: number }> = []
         const api = {
-            getMessages: vi.fn(async (_sessionId: string, options: { beforeAt?: number | null; beforeSeq?: number | null; byPosition?: boolean; limit?: number } = {}) => {
+            getMessages: vi.fn(async (_sessionId: string, options: { beforeAt?: number | null; beforeSeq?: number | null; limit?: number } = {}) => {
                 callLog.push(options)
                 const callIndex = callLog.length
                 if (callIndex === 1 || callIndex === 3) {
@@ -354,11 +354,56 @@ describe('message-window-store async generations', () => {
         const finalState = getMessageWindowState(SESSION_ID)
         expect(finalState.isLoadingMore).toBe(false)
         expect(callLog).toEqual([
-            { byPosition: true, limit: 50 },
-            { byPosition: true, beforeAt: 1_700_000_400_000, beforeSeq: 101, limit: 50 },
-            { byPosition: true, limit: 50 },
-            { byPosition: true, beforeAt: 1_700_000_300_000, beforeSeq: 51, limit: 50 },
+            { limit: 50 },
+            { beforeAt: 1_700_000_400_000, beforeSeq: 101, limit: 50 },
+            { limit: 50 },
+            { beforeAt: 1_700_000_300_000, beforeSeq: 51, limit: 50 },
         ])
+    })
+
+    it('fetchOlder sends the composite cursor pair', async () => {
+        const latestPage = makeAgentMessagePage({
+            idPrefix: 'latest',
+            startSeq: 11,
+            count: 50,
+            startCreatedAt: 1_700_000_500_000,
+        })
+        const calls: Array<{ beforeAt?: number | null; beforeSeq?: number | null; limit?: number }> = []
+        const api = {
+            getMessages: vi.fn(async (_sessionId: string, options: { beforeAt?: number | null; beforeSeq?: number | null; limit?: number } = {}) => {
+                calls.push(options)
+                return calls.length === 1
+                    ? {
+                        messages: latestPage,
+                        page: {
+                            limit: options.limit ?? 50,
+                            nextBeforeSeq: 11,
+                            nextBeforeAt: 1_700_000_500_000,
+                            hasMore: true,
+                        }
+                    }
+                    : {
+                        messages: [],
+                        page: {
+                            limit: options.limit ?? 50,
+                            nextBeforeSeq: null,
+                            nextBeforeAt: null,
+                            hasMore: false,
+                        }
+                    }
+            })
+        } as Pick<ApiClient, 'getMessages'> & {
+            getMessages: ReturnType<typeof vi.fn>
+        }
+
+        await fetchLatestMessages(api as unknown as ApiClient, SESSION_ID)
+        await fetchOlderMessages(api as unknown as ApiClient, SESSION_ID)
+
+        expect(calls[1]).toEqual({
+            beforeAt: 1_700_000_500_000,
+            beforeSeq: 11,
+            limit: 50,
+        })
     })
 })
 

@@ -169,19 +169,7 @@ export class SyncEngine {
         return this.machineCache.getOnlineMachinesByNamespace(namespace)
     }
 
-    getMessagesPage(sessionId: string, options: { limit: number; beforeSeq: number | null }): {
-        messages: DecryptedMessage[]
-        page: {
-            limit: number
-            beforeSeq: number | null
-            nextBeforeSeq: number | null
-            hasMore: boolean
-        }
-    } {
-        return this.messageService.getMessagesPage(sessionId, options)
-    }
-
-    getMessagesPageByPosition(
+    getMessagesPage(
         sessionId: string,
         options: { limit: number; before?: { at: number; seq: number } | null }
     ): {
@@ -193,7 +181,7 @@ export class SyncEngine {
             hasMore: boolean
         }
     } {
-        return this.messageService.getMessagesPageByPosition(sessionId, options)
+        return this.messageService.getMessagesPage(sessionId, options)
     }
 
     getDeliverableMessagesAfter(sessionId: string, options: { afterSeq: number; limit: number; now: number }): DecryptedMessage[] {

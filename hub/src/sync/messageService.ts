@@ -27,17 +27,6 @@ function toVisibleDecryptedMessages(messages: StoredMessageForDelivery[]): Decry
     return messages.filter(isWebVisibleStoredMessage).map(toDecryptedMessage)
 }
 
-function getOldestSeq(messages: StoredMessageForDelivery[]): number | null {
-    let oldestSeq: number | null = null
-    for (const message of messages) {
-        if (typeof message.seq !== 'number') continue
-        if (oldestSeq === null || message.seq < oldestSeq) {
-            oldestSeq = message.seq
-        }
-    }
-    return oldestSeq
-}
-
 export class MessageService {
     constructor(
         private readonly store: Store,
@@ -52,43 +41,7 @@ export class MessageService {
         return toVisibleDecryptedMessages(stored)
     }
 
-    getMessagesPage(sessionId: string, options: { limit: number; beforeSeq: number | null }): {
-        messages: DecryptedMessage[]
-        page: {
-            limit: number
-            beforeSeq: number | null
-            nextBeforeSeq: number | null
-            hasMore: boolean
-        }
-    } {
-        let stored = this.store.messages.getMessages(sessionId, options.limit, options.beforeSeq ?? undefined)
-        let messages = toVisibleDecryptedMessages(stored)
-        let oldestSeq = getOldestSeq(stored)
-        let hasMore = oldestSeq !== null
-            && this.store.messages.getMessages(sessionId, 1, oldestSeq).length > 0
-
-        while (messages.length === 0 && hasMore && oldestSeq !== null) {
-            stored = this.store.messages.getMessages(sessionId, options.limit, oldestSeq)
-            messages = toVisibleDecryptedMessages(stored)
-            oldestSeq = getOldestSeq(stored)
-            hasMore = oldestSeq !== null
-                && this.store.messages.getMessages(sessionId, 1, oldestSeq).length > 0
-        }
-
-        const nextBeforeSeq = oldestSeq
-
-        return {
-            messages,
-            page: {
-                limit: options.limit,
-                beforeSeq: options.beforeSeq,
-                nextBeforeSeq,
-                hasMore
-            }
-        }
-    }
-
-    getMessagesPageByPosition(
+    getMessagesPage(
         sessionId: string,
         options: { limit: number; before?: { at: number; seq: number } | null }
     ): {

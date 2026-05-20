@@ -3,7 +3,7 @@ import { Server, type DefaultEventsMap } from 'socket.io'
 import { jwtVerify } from 'jose'
 import { z } from 'zod'
 import type { Store } from '../store'
-import { configuration } from '../configuration'
+import { getConfiguration } from '../configuration'
 import { constantTimeEquals } from '../utils/crypto'
 import { parseAccessToken } from '../utils/accessToken'
 import { registerCliHandlers } from './handlers/cli'
@@ -49,6 +49,7 @@ export function createSocketServer(deps: SocketServerDeps): {
     engine: Engine
     rpcRegistry: RpcRegistry
 } {
+    const configuration = getConfiguration()
     const corsOrigins = deps.corsOrigins ?? configuration.corsOrigins
     const allowAllOrigins = corsOrigins.includes('*')
     const corsOriginOption = allowAllOrigins ? '*' : corsOrigins

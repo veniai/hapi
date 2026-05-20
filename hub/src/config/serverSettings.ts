@@ -10,6 +10,8 @@
 
 import { getSettingsFile, readSettings, writeSettings } from './settings'
 
+const OLD_SETTINGS_FIELDS = ['webappHost', 'webappPort', 'webappUrl'] as const
+
 export interface ServerSettings {
     telegramBotToken: string | null
     telegramNotification: boolean
@@ -72,6 +74,17 @@ function deriveCorsOrigins(publicUrl: string): string[] {
     }
 }
 
+function rejectOldSettingsFields(settings: object, settingsFile: string): void {
+    const oldFields = OLD_SETTINGS_FIELDS.filter((field) => field in settings)
+    if (oldFields.length === 0) {
+        return
+    }
+    throw new Error(
+        `Unsupported old settings field(s) in ${settingsFile}: ${oldFields.join(', ')}. ` +
+        'Use listenHost, listenPort, and publicUrl.'
+    )
+}
+
 /**
  * Load hub settings with priority: env > file > default
  * Saves new env values to file when not already present
@@ -86,6 +99,7 @@ export async function loadServerSettings(dataDir: string): Promise<ServerSetting
             `Cannot read ${settingsFile}. Please fix or remove the file and restart.`
         )
     }
+    rejectOldSettingsFields(settings, settingsFile)
 
     let needsSave = false
     const sources: ServerSettingsResult['sources'] = {
@@ -112,7 +126,7 @@ export async function loadServerSettings(dataDir: string): Promise<ServerSetting
         sources.telegramBotToken = 'file'
     }
 
-    // telegramNotification: env > file > true (default enabled for backward compatibility)
+    // telegramNotification: env > file > true
     let telegramNotification = true
     if (process.env.TELEGRAM_NOTIFICATION !== undefined) {
         telegramNotification = process.env.TELEGRAM_NOTIFICATION === 'true'
@@ -154,7 +168,7 @@ export async function loadServerSettings(dataDir: string): Promise<ServerSetting
         sources.serverChanNotification = 'file'
     }
 
-    // listenHost: env > file (new or old name) > default
+    // listenHost: env > file > default
     let listenHost = '127.0.0.1'
     if (process.env.HAPI_LISTEN_HOST) {
         listenHost = process.env.HAPI_LISTEN_HOST
@@ -166,16 +180,9 @@ export async function loadServerSettings(dataDir: string): Promise<ServerSetting
     } else if (settings.listenHost !== undefined) {
         listenHost = settings.listenHost
         sources.listenHost = 'file'
-    } else if (settings.webappHost !== undefined) {
-        // Migrate from old field name
-        listenHost = settings.webappHost
-        sources.listenHost = 'file'
-        settings.listenHost = listenHost
-        delete settings.webappHost
-        needsSave = true
     }
 
-    // listenPort: env > file (new or old name) > default
+    // listenPort: env > file > default
     let listenPort = 3006
     if (process.env.HAPI_LISTEN_PORT) {
         const parsed = parseInt(process.env.HAPI_LISTEN_PORT, 10)
@@ -191,16 +198,9 @@ export async function loadServerSettings(dataDir: string): Promise<ServerSetting
     } else if (settings.listenPort !== undefined) {
         listenPort = settings.listenPort
         sources.listenPort = 'file'
-    } else if (settings.webappPort !== undefined) {
-        // Migrate from old field name
-        listenPort = settings.webappPort
-        sources.listenPort = 'file'
-        settings.listenPort = listenPort
-        delete settings.webappPort
-        needsSave = true
     }
 
-    // publicUrl: env > file (new or old name) > default
+    // publicUrl: env > file > default
     let publicUrl = `http://localhost:${listenPort}`
     if (process.env.HAPI_PUBLIC_URL) {
         publicUrl = process.env.HAPI_PUBLIC_URL
@@ -212,13 +212,6 @@ export async function loadServerSettings(dataDir: string): Promise<ServerSetting
     } else if (settings.publicUrl !== undefined) {
         publicUrl = settings.publicUrl
         sources.publicUrl = 'file'
-    } else if (settings.webappUrl !== undefined) {
-        // Migrate from old field name
-        publicUrl = settings.webappUrl
-        sources.publicUrl = 'file'
-        settings.publicUrl = publicUrl
-        delete settings.webappUrl
-        needsSave = true
     }
 
     // corsOrigins: env > file > derived from publicUrl

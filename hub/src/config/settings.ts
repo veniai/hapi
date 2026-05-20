@@ -20,10 +20,6 @@ export interface Settings {
     listenPort?: number
     publicUrl?: string
     corsOrigins?: string[]
-    // Legacy field names (for migration, read-only)
-    webappHost?: string
-    webappPort?: number
-    webappUrl?: string
 }
 
 export function getSettingsFile(dataDir: string): string {

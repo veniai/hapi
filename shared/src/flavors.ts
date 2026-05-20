@@ -49,3 +49,7 @@ export function supportsModelChange(flavor: string | null | undefined): boolean 
 export function supportsEffort(flavor: string | null | undefined): boolean {
     return hasCapability(flavor, Capabilities.Effort)
 }
+
+export function isCodexFamilyFlavor(flavor: string | null | undefined): boolean {
+    return flavor === 'codex' || flavor === 'gemini' || flavor === 'opencode'
+}

@@ -198,14 +198,10 @@ export class ApiClient {
         options: {
             beforeSeq?: number | null
             beforeAt?: number | null
-            byPosition?: boolean
             limit?: number
         }
     ): Promise<MessagesResponse> {
         const params = new URLSearchParams()
-        if (options.byPosition || options.beforeAt !== undefined && options.beforeAt !== null) {
-            params.set('byPosition', '1')
-        }
         if (options.beforeAt !== undefined && options.beforeAt !== null) {
             params.set('beforeAt', `${options.beforeAt}`)
         }

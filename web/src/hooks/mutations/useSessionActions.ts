@@ -4,7 +4,7 @@ import type { ApiClient } from '@/api/client'
 import type { CodexCollaborationMode, PermissionMode } from '@/types/api'
 import { queryKeys } from '@/lib/query-keys'
 import { clearMessageWindow } from '@/lib/message-window-store'
-import { isKnownFlavor } from '@/lib/agentFlavorUtils'
+import { isKnownFlavor } from '@hapi/protocol'
 
 export function useSessionActions(
     api: ApiClient | null,

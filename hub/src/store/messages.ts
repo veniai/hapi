@@ -95,18 +95,13 @@ export function addMessage(
 export function getMessages(
     db: Database,
     sessionId: string,
-    limit: number = 200,
-    beforeSeq?: number
+    limit: number = 200
 ): StoredMessage[] {
     const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(200, limit)) : 200
 
-    const rows = (beforeSeq !== undefined && beforeSeq !== null && Number.isFinite(beforeSeq))
-        ? db.prepare(
-            'SELECT * FROM messages WHERE session_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?'
-        ).all(sessionId, beforeSeq, safeLimit) as DbMessageRow[]
-        : db.prepare(
-            'SELECT * FROM messages WHERE session_id = ? ORDER BY seq DESC LIMIT ?'
-        ).all(sessionId, safeLimit) as DbMessageRow[]
+    const rows = db.prepare(
+        'SELECT * FROM messages WHERE session_id = ? ORDER BY seq DESC LIMIT ?'
+    ).all(sessionId, safeLimit) as DbMessageRow[]
 
     return rows.reverse().map(toStoredMessage)
 }
@@ -142,7 +137,7 @@ export function getDeliverableMessagesAfter(
 }
 
 /** Paginate messages by COALESCE(invoked_at, created_at) DESC, seq DESC.
- *  Used for V8 byPosition mode.  Results are returned in ascending display order. */
+ *  Results are returned in ascending display order. */
 export function getMessagesByPosition(
     db: Database,
     sessionId: string,

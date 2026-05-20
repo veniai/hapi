@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { SignJWT } from 'jose'
 import { z } from 'zod'
-import { configuration } from '../../configuration'
+import { getConfiguration } from '../../configuration'
 import { constantTimeEquals } from '../../utils/crypto'
 import { parseAccessToken } from '../../utils/accessToken'
 import { validateTelegramInitData } from '../telegramInitData'
@@ -37,6 +37,7 @@ export function createAuthRoutes(jwtSecret: Uint8Array, store: Store): Hono<WebA
 
         // Access Token authentication (CLI_API_TOKEN)
         if ('accessToken' in parsed.data) {
+            const configuration = getConfiguration()
             const parsedToken = parseAccessToken(parsed.data.accessToken)
             if (!parsedToken || !constantTimeEquals(parsedToken.baseToken, configuration.cliApiToken)) {
                 return c.json({ error: 'Invalid access token' }, 401)
@@ -45,6 +46,7 @@ export function createAuthRoutes(jwtSecret: Uint8Array, store: Store): Hono<WebA
             firstName = 'Web User'
             namespace = parsedToken.namespace
         } else {
+            const configuration = getConfiguration()
             if (!configuration.telegramEnabled || !configuration.telegramBotToken) {
                 return c.json({ error: 'Telegram authentication is disabled. Configure TELEGRAM_BOT_TOKEN.' }, 503)
             }

@@ -55,4 +55,19 @@ describe('resume schemas', () => {
 
         expect(parsed.success).toBe(true)
     })
+
+    it('requires invokedAt in messages-consumed sync events', () => {
+        expect(SyncEventSchema.safeParse({
+            type: 'messages-consumed',
+            sessionId: 'hapi-session-1',
+            localIds: ['local-1']
+        }).success).toBe(false)
+
+        expect(SyncEventSchema.safeParse({
+            type: 'messages-consumed',
+            sessionId: 'hapi-session-1',
+            localIds: ['local-1'],
+            invokedAt: 123
+        }).success).toBe(true)
+    })
 })

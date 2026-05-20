@@ -86,7 +86,7 @@ describe('MessageService goal status filtering', () => {
         store.messages.addMessage(session.id, redundantGoalStatusContent('No goal to clear'))
 
         const service = new MessageService(store, makeIo(() => {}), makePublisher() as any)
-        const page = service.getMessagesPage(session.id, { limit: 10, beforeSeq: null })
+        const page = service.getMessagesPage(session.id, { limit: 10, before: null })
 
         expect(page.messages.map(message => message.content)).toEqual([
             { role: 'user', content: { type: 'text', text: '/goal ship it' } },
@@ -102,7 +102,7 @@ describe('MessageService goal status filtering', () => {
         store.messages.addMessage(session.id, redundantGoalStatusContent('Goal active'))
 
         const service = new MessageService(store, makeIo(() => {}), makePublisher() as any)
-        const latest = service.getMessagesPage(session.id, { limit: 1, beforeSeq: null })
+        const latest = service.getMessagesPage(session.id, { limit: 1, before: null })
 
         expect(latest.messages).toHaveLength(1)
         expect(latest.messages[0]?.id).toBe(user.id)
@@ -118,12 +118,96 @@ describe('MessageService goal status filtering', () => {
         store.messages.addMessage(session.id, redundantGoalStatusContent('Goal active · 8016 tokens'))
 
         const service = new MessageService(store, makeIo(() => {}), makePublisher() as any)
-        const latest = service.getMessagesPageByPosition(session.id, { limit: 1, before: null })
+        const latest = service.getMessagesPage(session.id, { limit: 1, before: null })
 
         expect(latest.messages).toHaveLength(1)
         expect(latest.messages[0]?.id).toBe(user.id)
         expect(latest.page.nextBeforeSeq).toBe(user.seq)
         expect(latest.page.hasMore).toBe(false)
+    })
+})
+
+describe('MessageService message pagination', () => {
+    function makeService(store: Store): MessageService {
+        return new MessageService(store, makeIo(() => {}), makePublisher() as any)
+    }
+
+    it('returns the latest page with a composite cursor', () => {
+        const store = makeStore()
+        const session = makeSession(store, 'page-first')
+        const first = store.messages.addMessage(session.id, 'first', 'local-first')
+        const second = store.messages.addMessage(session.id, 'second', 'local-second')
+        const third = store.messages.addMessage(session.id, 'third', 'local-third')
+        store.messages.markMessagesInvoked(session.id, ['local-first'], 1_000)
+        store.messages.markMessagesInvoked(session.id, ['local-second'], 2_000)
+        store.messages.markMessagesInvoked(session.id, ['local-third'], 3_000)
+
+        const page = makeService(store).getMessagesPage(session.id, { limit: 2, before: null })
+
+        expect(page.messages.map((message) => message.id)).toEqual([second.id, third.id])
+        expect(page.page.nextBeforeAt).toBe(2_000)
+        expect(page.page.nextBeforeSeq).toBe(second.seq)
+        expect(page.page.hasMore).toBe(true)
+        expect(first.id).toBeDefined()
+    })
+
+    it('uses the composite cursor for older pages', () => {
+        const store = makeStore()
+        const session = makeSession(store, 'page-older')
+        const first = store.messages.addMessage(session.id, 'first', 'local-first')
+        const second = store.messages.addMessage(session.id, 'second', 'local-second')
+        const third = store.messages.addMessage(session.id, 'third', 'local-third')
+        store.messages.markMessagesInvoked(session.id, ['local-first'], 1_000)
+        store.messages.markMessagesInvoked(session.id, ['local-second'], 2_000)
+        store.messages.markMessagesInvoked(session.id, ['local-third'], 3_000)
+
+        const latest = makeService(store).getMessagesPage(session.id, { limit: 2, before: null })
+        const older = makeService(store).getMessagesPage(session.id, {
+            limit: 2,
+            before: { at: latest.page.nextBeforeAt!, seq: latest.page.nextBeforeSeq! }
+        })
+
+        expect(older.messages.map((message) => message.id)).toEqual([first.id])
+        expect(older.page.nextBeforeAt).toBe(1_000)
+        expect(older.page.nextBeforeSeq).toBe(first.seq)
+        expect(older.page.hasMore).toBe(false)
+        expect(second.id).toBeDefined()
+        expect(third.id).toBeDefined()
+    })
+
+    it('breaks equal timestamp ties by seq', () => {
+        const store = makeStore()
+        const session = makeSession(store, 'page-tie')
+        const first = store.messages.addMessage(session.id, 'first', 'local-first')
+        const second = store.messages.addMessage(session.id, 'second', 'local-second')
+        const third = store.messages.addMessage(session.id, 'third', 'local-third')
+        store.messages.markMessagesInvoked(session.id, ['local-first', 'local-second', 'local-third'], 1_000)
+
+        const latest = makeService(store).getMessagesPage(session.id, { limit: 2, before: null })
+        const older = makeService(store).getMessagesPage(session.id, {
+            limit: 2,
+            before: { at: latest.page.nextBeforeAt!, seq: latest.page.nextBeforeSeq! }
+        })
+
+        expect(latest.messages.map((message) => message.id)).toEqual([second.id, third.id])
+        expect(latest.page.nextBeforeAt).toBe(1_000)
+        expect(latest.page.nextBeforeSeq).toBe(second.seq)
+        expect(older.messages.map((message) => message.id)).toEqual([first.id])
+    })
+
+    it('orders scheduled queued messages by their display position without changing the cursor', () => {
+        const store = makeStore()
+        const session = makeSession(store, 'page-scheduled')
+        const scheduled = store.messages.addMessage(session.id, 'scheduled', 'local-scheduled', Date.now() + 60_000)
+        const invoked = store.messages.addMessage(session.id, 'invoked', 'local-invoked')
+        store.messages.markMessagesInvoked(session.id, ['local-invoked'], scheduled.createdAt + 1_000)
+
+        const page = makeService(store).getMessagesPage(session.id, { limit: 1, before: null })
+
+        expect(page.messages.map((message) => message.id)).toEqual([scheduled.id, invoked.id])
+        expect(page.page.nextBeforeAt).toBe(scheduled.createdAt + 1_000)
+        expect(page.page.nextBeforeSeq).toBe(invoked.seq)
+        expect(page.page.hasMore).toBe(true)
     })
 })
 
