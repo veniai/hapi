@@ -911,9 +911,11 @@ export function buildCliArgs(
       ? 'cursor'
       : agent === 'gemini'
         ? 'gemini'
-        : agent === 'opencode'
-          ? 'opencode'
-          : 'claude';
+        : agent === 'kimi'
+          ? 'kimi'
+          : agent === 'opencode'
+            ? 'opencode'
+            : 'claude';
   const args = [agentCommand];
   if (options.resumeSessionId) {
     if (agent === 'codex') {

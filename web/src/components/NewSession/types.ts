@@ -27,6 +27,9 @@ export const MODEL_OPTIONS: Record<AgentType, { value: string; label: string }[]
         { value: 'auto', label: 'Default' },
     ],
     cursor: [],
+    kimi: [
+        { value: 'auto', label: 'Default' },
+    ],
     gemini: [
         { value: 'auto', label: 'Default' },
         ...modelPresetOptions(GEMINI_MODEL_PRESETS, GEMINI_MODEL_LABELS),
