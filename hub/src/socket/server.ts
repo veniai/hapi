@@ -9,6 +9,7 @@ import { parseAccessToken } from '../utils/accessToken'
 import { registerCliHandlers } from './handlers/cli'
 import { registerTerminalHandlers } from './handlers/terminal'
 import { RpcRegistry } from './rpcRegistry'
+import { SOCKET_MAX_HTTP_BUFFER_SIZE } from './socketLimits'
 import type { SyncEvent } from '../sync/syncEngine'
 import { TerminalRegistry } from './terminalRegistry'
 import type { CliSocketWithData, SocketData, SocketServer } from './socketTypes'
@@ -62,12 +63,14 @@ export function createSocketServer(deps: SocketServerDeps): {
     }
 
     const io = new Server<DefaultEventsMap, DefaultEventsMap, DefaultEventsMap, SocketData>({
-        cors: corsOptions
+        cors: corsOptions,
+        maxHttpBufferSize: SOCKET_MAX_HTTP_BUFFER_SIZE
     })
 
     const engine = new Engine({
         path: '/socket.io/',
         cors: corsOptions,
+        maxHttpBufferSize: SOCKET_MAX_HTTP_BUFFER_SIZE,
         allowRequest: async (req) => {
             const origin = req.headers.get('origin')
             if (!origin || allowAllOrigins || corsOrigins.includes(origin)) {
