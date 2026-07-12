@@ -408,6 +408,7 @@ export default {
   'tool.requestUserInput.textPlaceholder': 'Type your answer…',
   'tool.requestUserInput.noteLabel': 'Additional note (optional)',
   'tool.requestUserInput.notePlaceholder': 'Add a note…',
+  'tool.requestUserInput.popupBlocked': 'Could not open the sign-in page. Allow popups and try again.',
   'toolGroup.title': 'Tool activity',
   'toolGroup.primary.fileTargets': '{target} +{n}',
   'toolGroup.primary.commandTargets': '{target} +{n}',
