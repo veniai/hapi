@@ -30,6 +30,8 @@ const AUTO_SCROLL_RESUME_THRESHOLD_PX = 120
 const MANUAL_SCROLL_EPSILON_PX = 1
 const INITIAL_SCROLL_SETTLE_MS = 1800
 const INITIAL_SCROLL_SETTLE_DELAYS_MS = [0, 16, 50, 120, 250, 500, 900, 1400, 1800] as const
+// L1.1：发消息后多段补滚（覆盖用户消息经 hub/SSE 延迟渲染）
+const SEND_FOLLOWUP_SCROLL_DELAYS_MS = [200, 500] as const
 
 type ScrollIntent = {
     distanceFromBottom: number
@@ -347,30 +349,45 @@ export function HappyThread(props: {
         )
     }, [])
 
+    // atBottom / autoScroll 同步工具（组件级 useCallback，供 scroll 监听与 ResizeObserver 复用）。
+    // 锁步更新两个 ref；atBottom 变化时触发 onAtBottomChange，true 时 flush pending。
+    const setAutoScrollMode = useCallback((enabled: boolean) => {
+        if (autoScrollEnabledRef.current === enabled) {
+            return
+        }
+        autoScrollEnabledRef.current = enabled
+    }, [])
+    const setAtBottomMode = useCallback((atBottom: boolean) => {
+        if (atBottom === atBottomRef.current) {
+            return
+        }
+        atBottomRef.current = atBottom
+        onAtBottomChangeRef.current(atBottom)
+        if (atBottom) {
+            onFlushPendingRef.current()
+        }
+    }, [])
+    // L1.1：重算当前滚动位置并同步 atBottom/autoScroll（ResizeObserver 内容增高时只同步、不主动滚）。
+    const recomputeAtBottom = useCallback(() => {
+        const viewport = viewportRef.current
+        if (!viewport) return
+        const intent = getScrollIntent({
+            scrollTop: viewport.scrollTop,
+            scrollHeight: viewport.scrollHeight,
+            clientHeight: viewport.clientHeight,
+            previousScrollTop: lastScrollTopRef.current
+        })
+        lastScrollTopRef.current = viewport.scrollTop
+        setAutoScrollMode(intent.isNearBottom)
+        setAtBottomMode(intent.isNearBottom)
+    }, [setAutoScrollMode, setAtBottomMode])
+
     // Track scroll position to toggle autoScroll (stable listener using refs)
     useEffect(() => {
         const viewport = viewportRef.current
         if (!viewport) return
 
         lastScrollTopRef.current = viewport.scrollTop
-
-        const setAutoScrollMode = (enabled: boolean) => {
-            if (autoScrollEnabledRef.current === enabled) {
-                return
-            }
-            autoScrollEnabledRef.current = enabled
-        }
-
-        const setAtBottomMode = (atBottom: boolean) => {
-            if (atBottom === atBottomRef.current) {
-                return
-            }
-            atBottomRef.current = atBottom
-            onAtBottomChangeRef.current(atBottom)
-            if (atBottom) {
-                onFlushPendingRef.current()
-            }
-        }
 
         const handleScroll = () => {
             const intent = getScrollIntent({
@@ -499,7 +516,15 @@ export function HappyThread(props: {
             return
         }
         forceScrollTokenRef.current = props.forceScrollToken
+        // L1.1：发消息滚到底——smooth scrollToBottom（重置跟随状态 + flush pending），
+        // 加真 setTimeout 多段补滚，覆盖用户消息经 hub/SSE 延迟渲染。
         scrollToBottom()
+        const timers = SEND_FOLLOWUP_SCROLL_DELAYS_MS.map((delay) => window.setTimeout(() => {
+            scrollToBottom()
+        }, delay))
+        return () => {
+            for (const t of timers) clearTimeout(t)
+        }
     }, [props.forceScrollToken, scrollToBottom])
 
     const loadOlderPreservingScroll = useCallback((): Promise<boolean> => {
@@ -618,20 +643,16 @@ export function HappyThread(props: {
         }
 
         const observer = new ResizeObserver(() => {
-            // Message DOM can grow after messagesVersion commits (assistant-ui
-            // updates its external runtime in an effect, then markdown/tool
-            // content may resize). Keep following while the user is at bottom.
-            if (
-                autoScrollEnabledRef.current
-                && atBottomRef.current
-                && !pendingScrollRef.current
-            ) {
-                scrollToBottomInstant()
+            // L1.1：默认不动——内容增高时只重算并同步 atBottom/autoScroll，
+            // 不再主动 scrollToBottomInstant。用户停在当前阅读位置；atBottom 据实同步。
+            if (pendingScrollRef.current) {
+                return
             }
+            recomputeAtBottom()
         })
         observer.observe(content)
         return () => observer.disconnect()
-    }, [scrollToBottomInstant])
+    }, [recomputeAtBottom])
 
     useLayoutEffect(() => {
         const pending = pendingScrollRef.current
@@ -651,10 +672,9 @@ export function HappyThread(props: {
             settlePendingLoad(true)
             return
         }
-        if (atBottomRef.current && autoScrollEnabledRef.current) {
-            scrollToBottomInstant()
-        }
-    }, [props.messagesVersion, scrollToBottomInstant, settlePendingLoad])
+        // L1.1：去掉「在底部就自动滚」分支——只保留加载历史保位（pending）。
+        // 自动跟随由用户主动行为（发消息 / 回到底部按钮）触发，流式期间不再拽到底。
+    }, [props.messagesVersion, settlePendingLoad])
 
     useEffect(() => {
         isLoadingMoreRef.current = props.isLoadingMoreMessages
