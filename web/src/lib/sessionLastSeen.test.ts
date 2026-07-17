@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest'
-import { getSessionLastSeenAt, markSessionSeen } from './sessionLastSeen'
+import { getSessionLastSeenAt, markSessionSeen, SESSION_LAST_SEEN_EVENT } from './sessionLastSeen'
 
 describe('sessionLastSeen', () => {
     beforeEach(() => {
@@ -43,5 +43,19 @@ describe('sessionLastSeen', () => {
         if (localStorageDescriptor) {
             Object.defineProperty(window, 'localStorage', localStorageDescriptor)
         }
+    })
+
+    it('dispatches SESSION_LAST_SEEN_EVENT when watermark rises (same-tab notify)', () => {
+        const handler = vi.fn()
+        window.addEventListener(SESSION_LAST_SEEN_EVENT, handler)
+
+        markSessionSeen('session-a', 1000) // 上升 → 派发
+        expect(handler).toHaveBeenCalledTimes(1)
+        markSessionSeen('session-a', 500) // 不上升 → 不派发
+        expect(handler).toHaveBeenCalledTimes(1)
+        markSessionSeen('session-a', 2000) // 上升 → 派发
+        expect(handler).toHaveBeenCalledTimes(2)
+
+        window.removeEventListener(SESSION_LAST_SEEN_EVENT, handler)
     })
 })

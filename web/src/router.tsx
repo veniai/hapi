@@ -25,6 +25,7 @@ import { useAppContext } from '@/lib/app-context'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { isTelegramApp } from '@/hooks/useTelegram'
 import { useSidebarResize } from '@/hooks/useSidebarResize'
+import { useTabVisible } from '@/hooks/useTabVisible'
 import { useMessages } from '@/hooks/queries/useMessages'
 import { useMachines } from '@/hooks/queries/useMachines'
 import { useSession } from '@/hooks/queries/useSession'
@@ -213,12 +214,19 @@ function SessionsPage() {
         () => selectedSessionId ? sessions.find((session) => session.id === selectedSessionId) ?? null : null,
         [selectedSessionId, sessions]
     )
+    const isTabVisible = useTabVisible()
     useEffect(() => {
         if (!selectedSessionId || !selectedSession) {
             return
         }
+        // L0.2：tab 隐藏（锁屏/切走但 PWA 活着）期间冻结水位，避免 SSE 推高的
+        // updatedAt 把 lastSeenAt 推到最新——保证 AFK 返回时"第一条未读"仍在
+        // （L3.1 定位 / L1.2 时间红共用此水位）。定位完成前的进一步门控见 L3.1。
+        if (!isTabVisible) {
+            return
+        }
         markSessionSeen(selectedSessionId, selectedSession.updatedAt)
-    }, [selectedSessionId, selectedSession?.updatedAt])
+    }, [selectedSessionId, selectedSession?.updatedAt, isTabVisible])
     const currentCodexSessionId = selectedSession?.metadata?.flavor === 'codex'
         ? (selectedSession.metadata.agentSessionId ?? null)
         : null
