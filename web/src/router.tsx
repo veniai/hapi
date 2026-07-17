@@ -491,7 +491,7 @@ function SessionsPage() {
                 style={{ '--sidebar-w': `${sidebar.width}px` } as React.CSSProperties}
             >
                 <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
-                    <div className="mx-auto w-full max-w-content flex items-center justify-between px-3 py-2">
+                    <div className="flex items-center justify-between px-3 py-2">
                         <div className="text-xs text-[var(--app-hint)]">
                             {t('sessions.count', { n: sessions.length, m: projectCount })}
                         </div>
@@ -537,7 +537,7 @@ function SessionsPage() {
 
                 <div className="app-scroll-y flex-1 min-h-0 desktop-scrollbar-left">
                     {error ? (
-                        <div className="mx-auto w-full max-w-content px-3 py-2">
+                        <div className="px-3 py-2">
                             <div className="text-sm text-red-600">{error}</div>
                         </div>
                     ) : null}
