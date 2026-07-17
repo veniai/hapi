@@ -30,6 +30,7 @@ import { ReconnectingBanner } from '@/components/ReconnectingBanner'
 import { VoiceErrorBanner } from '@/components/VoiceErrorBanner'
 import { LoadingState } from '@/components/LoadingState'
 import { ToastContainer } from '@/components/ToastContainer'
+import { PendingInboxFab } from '@/components/PendingInboxFab'
 import { PwaUpdateProvider } from '@/lib/pwa-update-context'
 import { ToastProvider, useToast } from '@/lib/toast-context'
 import type { SyncEvent } from '@/types/api'
@@ -305,6 +306,12 @@ function AppInner() {
     }, [t])
 
     const handleToast = useCallback((event: ToastEvent) => {
+        // L1.3：待处理浮窗（PendingInboxFab）接管「需要处理」两类的职能，不再限时闪现
+        // （避免与浮窗重复打扰）。Task completed/failed 仍走限时 toast（一次性通知）。
+        const normalizedTitle = event.data.title.trim()
+        if (normalizedTitle === 'Ready for input' || normalizedTitle === 'Permission Request') {
+            return
+        }
         const localized = translateIncomingToast(event.data.title, event.data.body)
         addToast({
             title: localized.title,
@@ -450,6 +457,7 @@ function AppInner() {
                     <Outlet />
                 </div>
                 <ToastContainer />
+                <PendingInboxFab />
                 <InstallPrompt />
             </VoiceProvider>
         </AppContextProvider>
