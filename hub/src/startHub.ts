@@ -213,6 +213,9 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
             config.dingtalkKeyword ?? undefined,
             config.publicUrl
         ))
+        console.log(`[Hub] Dingtalk: enabled (keyword:${config.dingtalkKeyword ? 'set' : 'none'}, sign:${config.dingtalkSecret ? 'on' : 'off'})`)
+    } else {
+        console.log(`[Hub] Dingtalk: disabled (webhook:${config.dingtalkWebhook ? 'set' : 'none'}, notification:${config.dingtalkNotification})`)
     }
 
     // Initialize Telegram bot (optional)
