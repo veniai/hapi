@@ -147,6 +147,10 @@ If testing in Telegram, set:
 - `HAPI_PUBLIC_URL` to the public HTTPS URL of the dev server.
 - `CORS_ORIGINS` to include the dev server origin.
 
+### i18n / translations
+
+All user-facing strings go through i18n: `useTranslation()` (`src/lib/use-translation.ts`) → `t('key')`. Resources are flat key→string objects in `src/lib/locales/en.ts` and `src/lib/locales/zh-CN.ts`. When adding a string, add the **same key to both files** (English source + Chinese) — they must stay in sync. Keys use dot-namespacing (`loading.session`, `login.title`).
+
 ## Tests
 
 Unit tests run under vitest + jsdom:

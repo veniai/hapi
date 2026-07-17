@@ -1,6 +1,6 @@
 # HAPI
 
-Run official Claude Code / Codex / Cursor Agent / Grok Build / OpenCode sessions locally and control them remotely through a Web / PWA / Telegram Mini App.
+Run official Claude Code / Codex / Cursor Agent / Grok Build / OpenCode / Gemini sessions locally and control them remotely through a Web / PWA / Telegram Mini App.
 
 > **Why HAPI?** HAPI is a local-first alternative to Happy. See [Why Not Happy?](docs/guide/why-hapi.md) for the key differences.
 
