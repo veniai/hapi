@@ -298,14 +298,14 @@ L2.1 钉钉 ──────────────────→ L3.3（通
 
 ## L2.2 · 改动五 · 左侧会话列表靠边对齐
 
-**目标**：sidebar 调宽后内容贴边（去居中留白）。
+**目标**：sidebar 调宽后内容贴边（去居中留白），三层树在保留层级的同时减少累计左缩进。
 
-**方案**：去掉 3 处 `mx-auto w-full max-w-content`：`router.tsx:486`（header）、`router.tsx:532`（error 条，真实含 w-full）、`SessionList.tsx:1022`（列表根），保留 `px-3` 等内边距。
+**方案**：去掉 3 处 `mx-auto w-full max-w-content`；列表实际内容的外层 padding 收到 4px，project/session 两层各保留 8px 缩进，不再叠加多余 `pl-1`。
 
 **前置依赖**：无。
 
 **硬约束/陷阱**：
-- **只改这 3 处，切勿扩散**：`mx-auto w-full max-w-content` 全站 25 处、`max-w-content` 共 31 处；SessionChat/SessionHeader/HappyThread 等的主内容区居中是**正确的**，不能动。
+- 只改 sidebar 自身宽度和层级缩进；SessionChat/SessionHeader/HappyThread 等的主内容区居中是**正确的**，不能动。
 - **勿改** `tailwind.config.ts:7-9` `maxWidth.content` 定义（否则破坏主内容区居中）。
 - **勿破坏** `desktop-scrollbar-left` 的 rtl/ltr（`index.css:357-363`）。
 - 纯桌面端（≥1024px）问题。

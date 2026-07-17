@@ -136,6 +136,46 @@ describe('SessionList collapse behavior', () => {
         return panel
     }
 
+    it('keeps hierarchy readable with compact edge-aligned indentation', () => {
+        const { container } = render(renderSessionList([
+            makeSession({
+                id: 'session-running',
+                active: true,
+                metadata: { path: '/work/hapi', name: 'Running task', flavor: 'codex' },
+            })
+        ]))
+
+        expect(container.querySelector('[data-session-list-level="machine"]')?.className).toContain('px-1')
+        expect(container.querySelector('[data-session-list-level="project"]')?.className).toContain('ml-2')
+        expect(container.querySelector('[data-session-list-level="session"]')?.className).toContain('ml-2')
+    })
+
+    it('colors unread titles and times but leaves archived sessions muted', () => {
+        localStorage.clear()
+        render(renderSessionList([
+            makeSession({
+                id: 'unread',
+                active: true,
+                updatedAt: 200,
+                metadata: { path: '/work/hapi', name: 'Unread task', flavor: 'codex' },
+            }),
+            makeSession({
+                id: 'archived',
+                updatedAt: 200,
+                metadata: {
+                    path: '/work/hapi',
+                    name: 'Archived task',
+                    flavor: 'codex',
+                    lifecycleState: 'archived'
+                },
+            })
+        ], 'another-session'))
+
+        expect(screen.getByText('Unread task').className).toContain('text-red-500')
+        expect(screen.getByText('Unread task').closest('button')?.querySelectorAll('.text-red-500')).toHaveLength(2)
+        expect(screen.getByText('Archived task').className).not.toContain('text-red-500')
+    })
+
     it('keeps a selected running path collapsed across live session-list refreshes', async () => {
         const baseSessions = [
             makeSession({

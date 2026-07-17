@@ -32,6 +32,21 @@ describe('classifySessionAttention', () => {
         expect(attention).toBeNull()
     })
 
+    it('returns null for archived sessions even when stale requests remain', () => {
+        const attention = classifySessionAttention(
+            makeSummary({
+                id: 'archived',
+                active: false,
+                metadata: { path: '/work/hapi', lifecycleState: 'archived' },
+                pendingRequestKinds: ['permission'],
+                pendingRequestsCount: 1,
+                updatedAt: 5000
+            }),
+            { selected: false, lastSeenAt: 0 }
+        )
+        expect(attention).toBeNull()
+    })
+
     it('prioritizes permission over unread activity', () => {
         const attention = classifySessionAttention(
             makeSummary({

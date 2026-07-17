@@ -326,6 +326,19 @@ describe('getVisibleSessionPreview', () => {
         expect(preview.map(session => session.id)).toEqual(['s-1', 's-5', 's-6'])
     })
 
+    it('does not force archived sessions with stale pending requests into the collapsed preview', () => {
+        const sessions = Array.from({ length: 6 }, (_, index) => makeSession({
+            id: `s-${index + 1}`,
+            pendingRequestsCount: index === 4 ? 1 : 0,
+            metadata: index === 4
+                ? { path: '/work/hapi', lifecycleState: 'archived' }
+                : { path: '/work/hapi' }
+        }))
+
+        expect(getVisibleSessionPreview(sessions, { limit: 3 }).map(session => session.id))
+            .toEqual(['s-1', 's-2', 's-3'])
+    })
+
     it('does not exceed the limit just because many sessions are active', () => {
         const sessions = Array.from({ length: 6 }, (_, index) => makeSession({
             id: `s-${index + 1}`,
