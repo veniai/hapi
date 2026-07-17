@@ -42,6 +42,7 @@ execplan/
 # Generated npm bundle output (local)
 cli/npm/main/
 .ace-tool/
+.cortex/
 
 # Playwright e2e artifacts
 test-results/
