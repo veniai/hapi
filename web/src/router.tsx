@@ -39,7 +39,7 @@ import { ApiError } from '@/api/client'
 import { queryKeys } from '@/lib/query-keys'
 import { useToast } from '@/lib/toast-context'
 import { useTranslation } from '@/lib/use-translation'
-import { fetchLatestMessages, seedMessageWindowFromSession } from '@/lib/message-window-store'
+import { fetchLatestMessages, gcMessageWindows, seedMessageWindowFromSession } from '@/lib/message-window-store'
 import { clearDraftsAfterSend } from '@/lib/clearDraftsAfterSend'
 import { inactiveSessionCanResume } from '@/lib/sessionResume'
 import { markSessionSeen } from '@/lib/sessionLastSeen'
@@ -176,6 +176,11 @@ function SessionsPage() {
     const { t } = useTranslation()
     const { addToast } = useToast()
     const { sessions, isLoading, error, refetch } = useSessions(api)
+    // L0.3：孤儿 GC——会话从 hub 删除后 sessionStorage 的 message-window key
+    // 残留、撑爆配额。拿到列表后清掉不在列表里的 key。
+    useEffect(() => {
+        gcMessageWindows(new Set(sessions.map((s) => s.id)))
+    }, [sessions])
     const { machines } = useMachines(api, true)
     const [isSyncingCodexSession, setIsSyncingCodexSession] = useState(false)
     const [codexSessions, setCodexSessions] = useState<CodexLocalSessionSummary[]>([])

@@ -593,6 +593,8 @@ export function useSSE(options: {
             if (getVisibilityState() !== 'visible') return
             if (eventSourceRef.current !== eventSource) return
             if (Date.now() - lastActivityAtRef.current >= HEARTBEAT_STALE_MS) {
+                // L0.3：亮屏立即重连并重置退避，不等锁屏期间累积的 backoff。
+                reconnectAttemptRef.current = 0
                 requestReconnect('visibility-recovery')
             }
         }

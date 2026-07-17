@@ -115,6 +115,36 @@ function getStorageKey(sessionId: string): string {
     return `${STORAGE_KEY_PREFIX}${sessionId}`
 }
 
+/**
+ * 孤儿 GC（L0.3）：清掉 sessionStorage 里不在 validSessionIds 的 message-window
+ * key（会话从 hub 删除后 sessionStorage 残留，实测 5 个孤儿 ~4.5MB 撑爆配额）。
+ * 由 SessionsPage 的 useSessions 拿到列表后调一次。返回清理条数。
+ */
+export function gcMessageWindows(validSessionIds: Set<string>): number {
+    if (!isSessionStorageAvailable()) {
+        return 0
+    }
+    let removed = 0
+    try {
+        const keysToRemove: string[] = []
+        for (let i = 0; i < sessionStorage.length; i++) {
+            const key = sessionStorage.key(i)
+            if (key === null) continue
+            if (!key.startsWith(STORAGE_KEY_PREFIX)) continue
+            const sessionId = key.slice(STORAGE_KEY_PREFIX.length)
+            if (!validSessionIds.has(sessionId)) {
+                keysToRemove.push(key)
+            }
+        }
+        for (const key of keysToRemove) {
+            sessionStorage.removeItem(key)
+            removed += 1
+        }
+    } catch {
+    }
+    return removed
+}
+
 function isSessionStorageAvailable(): boolean {
     try {
         return typeof sessionStorage?.getItem === 'function'

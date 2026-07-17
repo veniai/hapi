@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 import { precacheAndRoute } from 'workbox-precaching'
 import { registerRoute } from 'workbox-routing'
-import { CacheFirst, NetworkFirst } from 'workbox-strategies'
+import { CacheFirst, StaleWhileRevalidate } from 'workbox-strategies'
 import { ExpirationPlugin } from 'workbox-expiration'
 import {
     cleanupExpiredShareTransfers,
@@ -33,9 +33,8 @@ precacheAndRoute(self.__WB_MANIFEST)
 
 registerRoute(
     ({ url }) => url.pathname === '/api/sessions',
-    new NetworkFirst({
+    new StaleWhileRevalidate({
         cacheName: 'api-sessions',
-        networkTimeoutSeconds: 10,
         plugins: [
             new ExpirationPlugin({
                 maxEntries: 10,
@@ -47,9 +46,8 @@ registerRoute(
 
 registerRoute(
     ({ url }) => /^\/api\/sessions\/[^/]+$/.test(url.pathname),
-    new NetworkFirst({
+    new StaleWhileRevalidate({
         cacheName: 'api-session-detail',
-        networkTimeoutSeconds: 10,
         plugins: [
             new ExpirationPlugin({
                 maxEntries: 20,
@@ -61,9 +59,8 @@ registerRoute(
 
 registerRoute(
     ({ url }) => url.pathname === '/api/machines',
-    new NetworkFirst({
+    new StaleWhileRevalidate({
         cacheName: 'api-machines',
-        networkTimeoutSeconds: 10,
         plugins: [
             new ExpirationPlugin({
                 maxEntries: 5,

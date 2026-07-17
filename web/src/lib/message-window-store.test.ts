@@ -5,6 +5,7 @@ import {
     appendOptimisticMessage,
     clearMessageWindow,
     fetchLatestMessages,
+    gcMessageWindows,
     fetchOlderMessages,
     getMessageWindowState,
     ingestIncomingMessages,
@@ -679,5 +680,50 @@ describe('message-window-store visible trimming', () => {
         const ids = [...state.messages, ...state.pending].map((m) => m.id)
         expect(ids).not.toContain('ghost-server-id') // queued at fetch start + absent -> dropped
         expect(ids).toContain('fresh-server-id')      // arrived mid-fetch -> kept
+    })
+})
+
+describe('gcMessageWindows', () => {
+    const PREFIX = 'hapi:message-window:v1:'
+
+    afterEach(() => {
+        sessionStorage.clear()
+    })
+
+    it('removes orphan message-window keys not in the valid set', () => {
+        sessionStorage.setItem(`${PREFIX}keep-1`, '{}')
+        sessionStorage.setItem(`${PREFIX}keep-2`, '{}')
+        sessionStorage.setItem(`${PREFIX}orphan-1`, '{}')
+        sessionStorage.setItem(`${PREFIX}orphan-2`, '{}')
+
+        const removed = gcMessageWindows(new Set(['keep-1', 'keep-2']))
+
+        expect(removed).toBe(2)
+        expect(sessionStorage.getItem(`${PREFIX}keep-1`)).not.toBeNull()
+        expect(sessionStorage.getItem(`${PREFIX}keep-2`)).not.toBeNull()
+        expect(sessionStorage.getItem(`${PREFIX}orphan-1`)).toBeNull()
+        expect(sessionStorage.getItem(`${PREFIX}orphan-2`)).toBeNull()
+    })
+
+    it('leaves unrelated keys untouched', () => {
+        sessionStorage.setItem(`${PREFIX}keep`, '{}')
+        sessionStorage.setItem('hapi:other:v1:x', '{}')
+        sessionStorage.setItem('hapi.sessionLastSeen.v1', '{}')
+
+        const removed = gcMessageWindows(new Set(['keep']))
+
+        expect(removed).toBe(0)
+        expect(sessionStorage.getItem('hapi:other:v1:x')).not.toBeNull()
+        expect(sessionStorage.getItem('hapi.sessionLastSeen.v1')).not.toBeNull()
+    })
+
+    it('removes everything when valid set is empty', () => {
+        sessionStorage.setItem(`${PREFIX}a`, '{}')
+        sessionStorage.setItem(`${PREFIX}b`, '{}')
+
+        const removed = gcMessageWindows(new Set())
+
+        expect(removed).toBe(2)
+        expect(sessionStorage.getItem(`${PREFIX}a`)).toBeNull()
     })
 })
