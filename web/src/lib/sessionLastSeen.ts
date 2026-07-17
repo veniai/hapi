@@ -6,6 +6,9 @@ export const SESSION_LAST_SEEN_EVENT = 'hapi:session-last-seen'
 
 type LastSeenStore = Record<string, number>
 
+let cachedRaw: string | null | undefined
+let cachedStore: LastSeenStore = {}
+
 function getLocalStorage(): Storage | null {
     if (typeof window === 'undefined') {
         return null
@@ -25,14 +28,21 @@ function readStore(): LastSeenStore {
 
     try {
         const raw = storage.getItem(STORAGE_KEY)
+        if (raw === cachedRaw) {
+            return cachedStore
+        }
+        cachedRaw = raw
         if (!raw) {
-            return {}
+            cachedStore = {}
+            return cachedStore
         }
         const parsed: unknown = JSON.parse(raw)
         if (!parsed || typeof parsed !== 'object') {
-            return {}
+            cachedStore = {}
+            return cachedStore
         }
-        return parsed as LastSeenStore
+        cachedStore = parsed as LastSeenStore
+        return cachedStore
     } catch {
         return {}
     }
@@ -44,7 +54,10 @@ function writeStore(store: LastSeenStore): void {
         return
     }
     try {
-        storage.setItem(STORAGE_KEY, JSON.stringify(store))
+        const raw = JSON.stringify(store)
+        storage.setItem(STORAGE_KEY, raw)
+        cachedRaw = raw
+        cachedStore = store
     } catch {
         // Ignore storage errors
     }
@@ -52,6 +65,10 @@ function writeStore(store: LastSeenStore): void {
 
 export function getSessionLastSeenAt(sessionId: string): number {
     return readStore()[sessionId] ?? 0
+}
+
+export function getSessionLastSeenStore(): Readonly<LastSeenStore> {
+    return readStore()
 }
 
 function notifySessionLastSeenChange(sessionId: string): void {
@@ -69,8 +86,7 @@ export function markSessionSeen(sessionId: string, seenAt: number): void {
     const prev = store[sessionId] ?? 0
     // 仅当水位实际上升时才写 + 通知（单调；避免无变化触发同/跨 tab 抖动）
     if (seenAt > prev) {
-        store[sessionId] = seenAt
-        writeStore(store)
+        writeStore({ ...store, [sessionId]: seenAt })
         notifySessionLastSeenChange(sessionId)
     }
 }

@@ -15,7 +15,7 @@ import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
 import { useSessionListStatusMode } from '@/hooks/useSessionListStatusMode'
 import { useShowActiveSessionsOnly } from '@/hooks/useShowActiveSessionsOnly'
 import { classifySessionAttention } from '@/lib/sessionAttention'
-import { getSessionLastSeenAt } from '@/lib/sessionLastSeen'
+import { getSessionLastSeenStore } from '@/lib/sessionLastSeen'
 import { useSessionLastSeenVersion } from '@/hooks/useSessionLastSeen'
 import { getAttentionLabel, SessionAttentionIndicator } from '@/components/SessionAttentionIndicator'
 import { HoverTooltip, SESSION_ROW_TOOLTIP_FOCUS_CLASS, useSessionRowTooltipIds } from '@/components/HoverTooltip'
@@ -576,9 +576,10 @@ function SessionItem(props: {
     api: ApiClient | null
     selected?: boolean
     showDetailedStatus?: boolean
+    lastSeenAt?: number
 }) {
     const { t } = useTranslation()
-    const { session: s, onSelect, showPath = true, api, selected = false, showDetailedStatus = false } = props
+    const { session: s, onSelect, showPath = true, api, selected = false, showDetailedStatus = false, lastSeenAt = 0 } = props
     const { haptic } = usePlatform()
     const [menuOpen, setMenuOpen] = useState(false)
     const [menuAnchorPoint, setMenuAnchorPoint] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
@@ -640,10 +641,8 @@ function SessionItem(props: {
     const sessionName = getSessionTitle(s)
     const worktreeLabel = getWorktreeSessionLabel(s)
     const todoProgress = getTodoProgress(s)
-    // L1.2：时间未读变红——订阅 lastSeen 水位变化（同 tab 事件 + 跨 tab storage），
-    // 响应式重算。排除 thinking 会话与当前选中会话（沿用 sessionAttention 短路语义）。
-    const lastSeenVersion = useSessionLastSeenVersion()
-    const lastSeenAt = useMemo(() => getSessionLastSeenAt(s.id), [s.id, lastSeenVersion])
+    // The list owns one last-seen subscription and passes each row its value.
+    // Per-row subscriptions made every watermark update rerender the whole list N times.
     const isUnreadTime = s.updatedAt > lastSeenAt && !s.thinking && !selected
     const attention = useMemo(
         () => showDetailedStatus
@@ -816,6 +815,11 @@ export function SessionList(props: {
     const { sessionListStatusMode } = useSessionListStatusMode()
     const { showActiveSessionsOnly } = useShowActiveSessionsOnly()
     const showDetailedStatus = sessionListStatusMode === 'detailed'
+    const lastSeenVersion = useSessionLastSeenVersion()
+    const lastSeenBySession = useMemo(
+        () => getSessionLastSeenStore(),
+        [lastSeenVersion]
+    )
     const [searchQuery, setSearchQuery] = useState('')
     const [, setCodexImportedSessionsVersion] = useState(0)
     const normalizedQuery = normalizeSearch(searchQuery)
@@ -1125,6 +1129,7 @@ export function SessionList(props: {
                                                                 api={api}
                                                                 selected={s.id === selectedSessionId}
                                                                 showDetailedStatus={showDetailedStatus}
+                                                                lastSeenAt={lastSeenBySession[s.id] ?? 0}
                                                             />
                                                         ))}
                                                         {!isSearching && group.sessions.length > sessionPreviewLimit && (hiddenSessionCount > 0 || canCollapseSessions) ? (

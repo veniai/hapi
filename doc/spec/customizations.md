@@ -107,7 +107,7 @@ L2.1 钉钉 ──────────────────→ L3.3（通
 
 **方案**：
 - `router.tsx` markSessionSeen effect（L216-221，当前依赖 `[selectedSessionId, selectedSession?.updatedAt]`、无 visibility 检查）加 `visibilitychange` 门控：仅 `document.visibilityState==='visible'` 时 `markSessionSeen`，hidden 时冻结。
-- 抽共享 `useSessionLastSeen` hook：①版本号 state；②订阅两个源——**跨 tab** `storage` event listener + **同 tab** `markSessionSeen` 后主动通知（派发自定义事件 / bump 版本号，因 `storage` event 不在执行 setItem 的当前 tab 触发）；SessionList / 浮窗 / 定位共用。
+- 抽共享 `useSessionLastSeen` hook：①版本号 state；②订阅两个源——**跨 tab** `storage` event listener + **同 tab** `markSessionSeen` 后主动通知（派发自定义事件 / bump 版本号，因 `storage` event 不在执行 setItem 的当前 tab 触发）；SessionList / 浮窗 / 定位共用。SessionList 只在列表层订阅一次并将水位传给各行，不得每行注册全局事件。
 - **水位时序契约（与 L3.1 共同遵守）**：进入/恢复会话时**先快照旧 lastSeenAt 用于定位，定位确认可见后才 markSessionSeen 推进到最新**——否则 visible 恢复/导航进入瞬间推进水位会让"第一条未读"消失。具体实现见 L3.1（`locateSettledFor` + `visibilitychange`）。
 - 红点（L1.2）继续用会话级水位（够用）；resume 定位（L3.1）用同一水位 + 门控。
 
@@ -117,7 +117,7 @@ L2.1 钉钉 ──────────────────→ L3.3（通
 - `markSessionSeen` 单调 `Math.max`（`sessionLastSeen.ts:58`），门控只加 visibility 检查、不改水位语义。
 - **`storage` event 不在当前 tab 触发**（仅跨 tab）——hook 必须额外监听同 tab `markSessionSeen` 的主动通知，否则本 tab 写水位后红点/浮窗不即时更新。
 - 跨 tab 须补 `storage` listener（他 tab 改水位本 tab 感知），否则多 tab 水位不一致。
-- 现有 SessionList 选中/取消选中路径会触发 memo 重算（Codex 确认非 bug）；真正缺口是「跨 tab」与「浮窗 selected 恒 false」，本项的共享 hook 覆盖。
+- SessionList 选中/取消选中路径会触发 memo 重算；浮窗必须另外识别当前路由，不能将 `selected` 恒置为 false，否则重复点击会被同一会话挡住。
 
 **文件范围**：`web/src/router.tsx`、`web/src/lib/sessionLastSeen.ts`（+ 新 `useSessionLastSeen` hook，建议放 `web/src/hooks/`）。
 
@@ -136,14 +136,14 @@ L2.1 钉钉 ──────────────────→ L3.3（通
 **目标**：远程/移动端亮屏打开快——消除 10s `NetworkFirst` 等待、亮屏重连退避、孤儿 GC。是「快速打开」的基础设施。
 
 **方案**（按性价比，先 SW）：
-1. **SW `NetworkFirst` → `StaleWhileRevalidate`**（`web/src/sw.ts:36/50/64`，会话列表/详情/机器）：亮屏瞬时返回缓存、后台同时更新。SSE 负责实时、SW 只管初始瞬时显示（职责正交）。
+1. **SW 短超时 `NetworkFirst`**（`web/src/sw.ts`，会话列表/详情/机器）：最多等待网络 2s，超时才回退缓存。不用 `StaleWhileRevalidate`，避免已归档会话或旧 pending 状态先回到 UI；SSE 继续负责实时更新。
 2. **亮屏立即重连 + 重置退避**（`web/src/hooks/useSSE.ts` `onVisibilityChange` ~L599）：visible 且 SSE stale 时立即 `requestReconnect` 并 `reconnectAttempt=0`，不等累积 backoff（`BASE=1s`×2^attempt，`MAX=30s`，L43-45/207）。
 3. **孤儿 GC**（`web/src/lib/message-window-store.ts`）：会话从 hub 删除后 web sessionStorage 的 `hapi:message-window:v1:*` 不清理（实测 5 个孤儿 ~4.5MB 撑爆配额）。**唯一 owner**：抽 `gcMessageWindows(validSessionIds)` helper（放 message-window-store.ts），由 `useSessions`（router.tsx:177 SessionsPage 那处）拿列表后调一次——勿在 share/NewSession 的 useSessions 也调（避免重复扫描）。
 
 **前置依赖**：无。
 
 **硬约束/陷阱**：
-- SW 改 SWR 勿破坏 SSE 实时（SW 只管初始瞬时）。
+- SW 缓存不得以旧状态作为联网时的首个响应；网络不可用时仍允许回退缓存。
 - 孤儿 GC 只清 `hapi:message-window:v1:*` key，勿动其他 sessionStorage 项。
 
 **文件范围**：`web/src/sw.ts`、`web/src/hooks/useSSE.ts`、`web/src/lib/message-window-store.ts`（+ `gcMessageWindows` helper）、`web/src/router.tsx`（SessionsPage 的 useSessions 处调 GC，~L177）。
@@ -230,14 +230,14 @@ L2.1 钉钉 ──────────────────→ L3.3（通
 
 **方案**：
 1. **新组件** `web/src/components/PendingInboxFab.tsx`，挂**根 App**（AppInner，与 `<Outlet/>` L450 / `<ToastContainer/>` L452 同级），落在认证后分支（App.tsx L435，认证前提前 return），自行 `useSessions(api)`（`queryKeys.sessions` 去重，不重复请求）。
-2. **数据源 = attention 判定**（非 toast 队列）：从 `useSessions` 列表逐个 `classifySessionAttention(s, {selected:false, lastSeenAt})`，**按 kind 筛 permission/input/unread**（排除 background，不可用 `!==null`）后计数。
-3. **交互**：点击 → 导航第一个待处理会话（`/sessions/$id`）；**unread 须导航+定位+确认可见后才清**（markSessionSeen，见 L0.2 时序契约——到达事件本身不能清，否则浮窗和第一条未读立即消失）；permission/input 须等 agent 真正移除 `pendingRequestKinds`（不会点一下就跳下一个）→ 浮窗持续指向该会话。空 → 隐藏。
+2. **数据源 = attention 判定**（非 toast 队列）：从 `useSessions` 中先排除已归档/非活跃会话和当前会话，再**按 kind 筛 permission/input/unread**（排除 background）后计数。
+3. **交互**：点击 → 导航第一个待处理会话（`/sessions/$id`）；导航后当前会话退出队列，下次点击可继续下一个。**unread 须定位+确认可见后才清**；permission/input 在离开会话后会重新进队，直到 agent 真正移除 `pendingRequestKinds`。空 → 隐藏。
 4. **去限时闪现**：`App.tsx` `handleToast`（L307）对 `Ready for input`/`Permission Request` 不再 `addToast`；`Task completed/failed` 仍走限时 toast（`toast-context.ts:19` `TOAST_DURATION_MS=6000`）。
 
-**前置依赖**：L0.2（浮窗 selected 恒 false，依赖共享 lastSeen hook 的响应性）。
+**前置依赖**：L0.2（依赖共享 lastSeen hook 的响应性）。
 
 **硬约束/陷阱**：
-- **不能**复用 SessionList 的 attention 字段（被 `showDetailedStatus` 门控，standard 模式恒 null）——必须自行 classify。
+- **不能**复用 SessionList 的 attention 字段（被 `showDetailedStatus` 门控，standard 模式恒 null）——必须自行 classify。已归档会话即使保留旧 `updatedAt`/request 也不得进队。
 - attention 口径与 L1.2 一致（前端 permission/input/unread 排除 background）；L2.1 钉钉是 hub 侧独立口径（见共享点），不复用前端 attention。
 - last-seen 订阅用 L0.2 共享 hook（别在浮窗和 SessionList 各加一份版本号）。
 
