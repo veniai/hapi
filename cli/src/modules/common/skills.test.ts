@@ -16,6 +16,11 @@ async function writeSkill(skillDir: string, name: string, description: string): 
     ].join('\n'))
 }
 
+async function writeGitRoot(directory: string): Promise<void> {
+    await mkdir(join(directory, '.git'), { recursive: true })
+    await writeFile(join(directory, '.git', 'HEAD'), 'ref: refs/heads/main\n')
+}
+
 describe('listSkills', () => {
     const originalHome = process.env.HOME
     const originalClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR
@@ -97,7 +102,7 @@ describe('listSkills', () => {
 
     it('lists Grok user and project skills alongside shared .agents skills', async () => {
         const repoRoot = join(sandboxDir, 'grok-repo')
-        await mkdir(join(repoRoot, '.git'), { recursive: true })
+        await writeGitRoot(repoRoot)
         await writeSkill(join(homeDir, '.grok', 'skills', 'grok-user'), 'grok-user', 'Grok user skill')
         await writeSkill(join(homeDir, '.agents', 'skills', 'shared'), 'shared', 'Shared skill')
         await writeSkill(join(repoRoot, '.grok', 'skills', 'grok-project'), 'grok-project', 'Grok project skill')
@@ -245,7 +250,7 @@ describe('listSkills', () => {
         const packageDir = join(repoRoot, 'packages')
         const workingDirectory = join(packageDir, 'app')
 
-        await mkdir(join(repoRoot, '.git'), { recursive: true })
+        await writeGitRoot(repoRoot)
         await writeSkill(join(repoRoot, '.agents', 'skills', 'root-skill'), 'root-skill', 'Repo root skill')
         await writeSkill(join(packageDir, '.agents', 'skills', 'package-skill'), 'package-skill', 'Package skill')
         await writeSkill(join(workingDirectory, '.agents', 'skills', 'local-skill'), 'local-skill', 'Local skill')
@@ -256,11 +261,24 @@ describe('listSkills', () => {
         expect(skills.map((skill) => skill.name)).toEqual(['local-skill', 'package-skill', 'root-skill'])
     })
 
+    it('loads project skills when a worktree uses a .git file marker', async () => {
+        const repoRoot = join(sandboxDir, 'worktree')
+        const workingDirectory = join(repoRoot, 'apps', 'web')
+
+        await writeSkill(join(repoRoot, '.agents', 'skills', 'root-skill'), 'root-skill', 'Root skill')
+        await writeSkill(join(workingDirectory, '.agents', 'skills', 'local-skill'), 'local-skill', 'Local skill')
+        await writeFile(join(repoRoot, '.git'), 'gitdir: /tmp/example-worktree-git-dir\n')
+
+        const skills = await listSkills(workingDirectory)
+
+        expect(skills.map((skill) => skill.name)).toEqual(['local-skill', 'root-skill'])
+    })
+
     it('loads project skills from .claude/skills directories', async () => {
         const repoRoot = join(sandboxDir, 'repo')
         const workingDirectory = join(repoRoot, 'apps', 'web')
 
-        await mkdir(join(repoRoot, '.git'), { recursive: true })
+        await writeGitRoot(repoRoot)
         await writeSkill(join(repoRoot, '.claude', 'skills', 'claude-root'), 'claude-root', 'Claude root skill')
         await writeSkill(join(workingDirectory, '.claude', 'skills', 'claude-local'), 'claude-local', 'Claude local skill')
 
@@ -273,7 +291,7 @@ describe('listSkills', () => {
         const repoRoot = join(sandboxDir, 'repo')
         const workingDirectory = join(repoRoot, 'apps', 'web')
 
-        await mkdir(join(repoRoot, '.git'), { recursive: true })
+        await writeGitRoot(repoRoot)
         await writeSkill(join(repoRoot, '.codex', 'skills', 'codex-root'), 'codex-root', 'Codex root skill')
         await writeSkill(join(workingDirectory, '.codex', 'skills', 'codex-local'), 'codex-local', 'Codex local skill')
         await writeSkill(join(workingDirectory, '.codex', 'skills', '.system', 'codex-system'), 'codex-system', 'Codex system skill')
@@ -287,7 +305,7 @@ describe('listSkills', () => {
         const repoRoot = join(sandboxDir, 'repo')
         const workingDirectory = join(repoRoot, 'apps', 'web')
 
-        await mkdir(join(repoRoot, '.git'), { recursive: true })
+        await writeGitRoot(repoRoot)
         await writeSkill(join(workingDirectory, '.agents', 'skills', 'shared'), 'shared', 'From agents')
         await writeSkill(join(workingDirectory, '.claude', 'skills', 'shared'), 'shared', 'From claude')
 
@@ -301,6 +319,7 @@ describe('listSkills', () => {
         const parentDirectory = join(sandboxDir, 'workspace')
         const workingDirectory = join(parentDirectory, 'feature')
 
+        await mkdir(join(sandboxDir, '.git'), { recursive: true })
         await writeSkill(join(parentDirectory, '.agents', 'skills', 'parent-skill'), 'parent-skill', 'Parent skill')
         await writeSkill(join(workingDirectory, '.agents', 'skills', 'local-skill'), 'local-skill', 'Local skill')
 
@@ -313,7 +332,7 @@ describe('listSkills', () => {
         const repoRoot = join(sandboxDir, 'repo')
         const workingDirectory = join(repoRoot, 'apps', 'web')
 
-        await mkdir(join(repoRoot, '.git'), { recursive: true })
+        await writeGitRoot(repoRoot)
         await writeSkill(join(homeDir, '.agents', 'skills', 'shared'), 'shared', 'User shared skill')
         await writeSkill(join(repoRoot, '.agents', 'skills', 'shared'), 'shared', 'Repo shared skill')
         await writeSkill(join(workingDirectory, '.agents', 'skills', 'shared'), 'shared', 'Local shared skill')
@@ -332,7 +351,7 @@ describe('listSkills', () => {
         const repoRoot = join(sandboxDir, 'repo')
         const workingDirectory = join(repoRoot, 'apps', 'web')
 
-        await mkdir(join(repoRoot, '.git'), { recursive: true })
+        await writeGitRoot(repoRoot)
         await writeSkill(join(homeDir, '.agents', 'skills', 'shared'), 'shared', 'User shared skill')
         await writeSkill(join(repoRoot, '.agents', 'skills', 'shared'), 'shared', 'Repo shared skill')
         await writeSkill(join(workingDirectory, '.agents', 'skills', 'shared'), 'shared', 'Local shared skill')

@@ -1,4 +1,4 @@
-import { access, open, readdir, readFile } from 'fs/promises';
+import { access, open, readdir, readFile, stat } from 'fs/promises';
 import { basename, dirname, join, resolve } from 'path';
 import { homedir } from 'os';
 import { parse as parseYaml } from 'yaml';
@@ -106,6 +106,23 @@ async function pathExists(path: string): Promise<boolean> {
     }
 }
 
+async function isGitRoot(directory: string): Promise<boolean> {
+    const marker = join(directory, '.git');
+    try {
+        const markerStat = await stat(marker);
+        if (markerStat.isDirectory()) {
+            return await pathExists(join(marker, 'HEAD'));
+        }
+        if (markerStat.isFile()) {
+            const content = await readFile(marker, 'utf-8');
+            return /^gitdir:\s*.+$/m.test(content);
+        }
+    } catch {
+        return false;
+    }
+    return false;
+}
+
 async function listProjectSkillsRoots(workingDirectory?: string, flavor?: string): Promise<string[]> {
     if (!workingDirectory) {
         return [];
@@ -116,7 +133,7 @@ async function listProjectSkillsRoots(workingDirectory?: string, flavor?: string
     let currentDirectory = resolvedWorkingDirectory;
 
     while (true) {
-        if (await pathExists(join(currentDirectory, '.git'))) {
+        if (await isGitRoot(currentDirectory)) {
             return directories.flatMap((directory) => getProjectSkillsRoots(directory, flavor));
         }
 
