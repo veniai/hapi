@@ -105,6 +105,29 @@ export async function locateOutlineTargetMessage(options: LocateOutlineTargetOpt
     return target
 }
 
+type LocateFirstUnreadOptions = {
+    findFirstUnreadTargetId: () => string | null
+    hasMoreMessages: () => boolean
+    loadOlderPreservingScroll: () => Promise<boolean>
+}
+
+/**
+ * 定位「第一条未读」（L3.1）：与 locateOutlineTargetMessage 同样 load-until-found，
+ * 但用谓词回调 findFirstUnreadTargetId 代替已知 id——每加载一页重扫 normalized/blocks，
+ * 找第一条 createdAt > lastSeenAt。返回目标的 DOM 元素（scrollIntoView 用）。
+ * ≤50 条未读直接命中当前窗口；>50 条靠 while 翻页直到命中或历史耗尽。
+ */
+export async function locateFirstUnreadMessage(options: LocateFirstUnreadOptions): Promise<HTMLElement | null> {
+    let targetId = options.findFirstUnreadTargetId()
+    while (!targetId && options.hasMoreMessages()) {
+        const loaded = await options.loadOlderPreservingScroll()
+        if (!loaded) break
+        targetId = options.findFirstUnreadTargetId()
+    }
+    if (!targetId) return null
+    return document.getElementById(getConversationMessageAnchorId(targetId))
+}
+
 function NewMessagesIndicator(props: { count: number; onClick: () => void }) {
     const { t } = useTranslation()
     if (props.count === 0) {
@@ -265,6 +288,12 @@ export function HappyThread(props: {
     outlineItems: readonly ConversationOutlineItem[]
     onOutlineOpenChange: (open: boolean) => void
     onOutlineItemClick?: (item: ConversationOutlineItem) => void
+    // L3.1 第一条未读定位
+    findFirstUnreadTargetId?: () => string | null
+    onLocateSettled?: () => void
+    lastSeenAt?: number
+    // bumped by router on hidden→visible recovery to re-trigger locate
+    locateResetToken?: number
 }) {
     const { t } = useTranslation()
     const { terminalToolDisplayMode } = useTerminalToolDisplayMode()
@@ -293,6 +322,11 @@ export function HappyThread(props: {
     const initialScrollSessionRef = useRef<string | null>(null)
     const initialScrollDeadlineRef = useRef(0)
     const initialScrollTimersRef = useRef<number[]>([])
+    // L3.1 locate state
+    const locateAttemptedTokenRef = useRef(-1)
+    const locateTimerRef = useRef<number | null>(null)
+    const findFirstUnreadTargetIdRef = useRef(props.findFirstUnreadTargetId)
+    const onLocateSettledRef = useRef(props.onLocateSettled)
 
     // Smart scroll state: enabled only while the user is intentionally at the bottom.
     const autoScrollEnabledRef = useRef(true)
@@ -314,6 +348,12 @@ export function HappyThread(props: {
     useEffect(() => {
         onLoadMoreRef.current = props.onLoadMore
     }, [props.onLoadMore])
+    useEffect(() => {
+        findFirstUnreadTargetIdRef.current = props.findFirstUnreadTargetId
+    }, [props.findFirstUnreadTargetId])
+    useEffect(() => {
+        onLocateSettledRef.current = props.onLocateSettled
+    }, [props.onLocateSettled])
 
     useEffect(() => {
         sessionIdRef.current = props.sessionId
@@ -465,6 +505,11 @@ export function HappyThread(props: {
         initialScrollDeadlineRef.current = 0
         clearInitialScrollTimers()
         settlePendingLoad(false)
+        if (locateTimerRef.current !== null) {
+            window.clearTimeout(locateTimerRef.current)
+            locateTimerRef.current = null
+        }
+        locateAttemptedTokenRef.current = -1
     }, [props.sessionId, clearInitialScrollTimers, settlePendingLoad])
 
     useLayoutEffect(() => {
@@ -508,6 +553,10 @@ export function HappyThread(props: {
         return () => {
             clearInitialScrollTimers()
             settlePendingLoad(false)
+            if (locateTimerRef.current !== null) {
+                window.clearTimeout(locateTimerRef.current)
+                locateTimerRef.current = null
+            }
         }
     }, [clearInitialScrollTimers, settlePendingLoad])
 
@@ -604,6 +653,59 @@ export function HappyThread(props: {
             void loadOlderPreservingScroll()
         }
     }, [loadOlderPreservingScroll])
+
+    // L3.1: locate first unread message after initial scroll settling.
+    // settling 期间 loadOlderPreservingScroll 会 return false（禁分页），故
+    // 必须等 INITIAL_SCROLL_SETTLE 结束才触发；用 load-until-found 翻页。
+    useEffect(() => {
+        const finder = findFirstUnreadTargetIdRef.current
+        if (!finder) return
+        if (props.isLoadingMessages || props.rawMessagesCount === 0) return
+        if (initialScrollSessionRef.current !== props.sessionId) return
+
+        const token = props.locateResetToken ?? 0
+        if (locateAttemptedTokenRef.current === token) return
+
+        // Token changed (or first run) — clear stale timer from previous token
+        if (locateTimerRef.current !== null) {
+            window.clearTimeout(locateTimerRef.current)
+            locateTimerRef.current = null
+        }
+        locateAttemptedTokenRef.current = token
+
+        const deadline = initialScrollDeadlineRef.current
+        const waitMs = deadline > 0 ? Math.max(0, deadline - Date.now()) + 50 : 50
+
+        locateTimerRef.current = window.setTimeout(() => {
+            locateTimerRef.current = null
+            if (sessionIdRef.current !== props.sessionId) return
+
+            void (async () => {
+                const target = await locateFirstUnreadMessage({
+                    findFirstUnreadTargetId: finder,
+                    hasMoreMessages: () => hasMoreMessagesRef.current,
+                    loadOlderPreservingScroll
+                })
+                if (sessionIdRef.current !== props.sessionId) return
+
+                if (target) {
+                    target.scrollIntoView({ block: 'start', behavior: 'smooth' })
+                    autoScrollEnabledRef.current = false
+                } else {
+                    scrollToBottom()
+                }
+                onLocateSettledRef.current?.()
+            })()
+        }, waitMs)
+    }, [
+        props.locateResetToken,
+        props.isLoadingMessages,
+        props.rawMessagesCount,
+        props.sessionId,
+        props.messagesVersion,
+        loadOlderPreservingScroll,
+        scrollToBottom
+    ])
 
     useEffect(() => {
         const sentinel = topSentinelRef.current

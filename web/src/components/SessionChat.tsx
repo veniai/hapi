@@ -19,7 +19,8 @@ import { reduceChatBlocks } from '@/chat/reducer'
 import { reconcileChatBlocks } from '@/chat/reconcile'
 import { buildConversationOutline } from '@/chat/outline'
 import { buildVisibleChatBlocks, isToolGroupBlock, type ToolGroupBlock } from '@/chat/toolGroups'
-import { isQueuedForInvocation, mergeMessages } from '@/lib/messages'
+import { isQueuedForInvocation, isUserMessage, mergeMessages } from '@/lib/messages'
+import { getMessageWindowState, removeOptimisticMessage } from '@/lib/message-window-store'
 import { inactiveSessionCanResume } from '@/lib/sessionResume'
 import {
     getCodexModelReasoningEfforts,
@@ -351,6 +352,49 @@ export function ScratchlistDrawerHost(props: {
     )
 }
 
+/**
+ * A user message is safe to retract on quick-abort (mirroring Claude Code's
+ * Esc-before-commit) only when ALL of these hold:
+ *  - it is a user message
+ *  - not yet consumed by the agent (invokedAt === null)
+ *  - not a future scheduled send (scheduledAt === null)
+ *  - not a failed retry (status !== 'failed')
+ *  - not a queued / sent-while-busy message (status !== 'queued') — those live
+ *    in the floating bar, not the main thread, so assistant-ui's cancelRun
+ *    would not restore their text; retracting would silently lose them.
+ *  - server-confirmed, not still an in-flight optimistic row (id !== localId).
+ *    cancelQueuedMessage reports an absent row as `cancelled`
+ *    (hub/src/sync/messageService.ts); cancelling a row whose POST has not
+ *    landed yet would let the racing insert + SSE resurrect it.
+ *  - carries no attachments — assistant-ui's cancelRun restores only text, so
+ *    retracting would drop the only attachment copy (the composer-restore
+ *    path cannot reinstate attachment metadata).
+ */
+function retractableHasAttachments(message: DecryptedMessage): boolean {
+    const outer = message.content as
+        | { role?: string; content?: { type?: string; attachments?: unknown } }
+        | null
+    if (!outer || outer.role !== 'user') return false
+    const inner = outer.content
+    if (!inner || inner.type !== 'text') return false
+    return Array.isArray(inner.attachments) && inner.attachments.length > 0
+}
+
+export function findRetractableMessage(
+    messages: DecryptedMessage[]
+): DecryptedMessage | undefined {
+    return [...messages].reverse().find(
+        (m) =>
+            isUserMessage(m)
+            && m.invokedAt == null
+            && m.scheduledAt == null
+            && m.status !== 'failed'
+            && m.status !== 'queued'
+            && !(m.localId != null && m.id === m.localId)
+            && !retractableHasAttachments(m)
+    )
+}
+
 export function buildGoalStateMessages(
     messages: DecryptedMessage[],
     pendingMessages: DecryptedMessage[] = []
@@ -427,6 +471,10 @@ type SessionChatProps = {
     onClearSendError?: () => void
     initialOutlineOpen?: boolean
     onInitialOutlineConsumed?: () => void
+    // L3.1 第一条未读定位
+    lastSeenAt?: number
+    onLocateSettled?: () => void
+    locateResetToken?: number
 }
 
 /**
@@ -463,6 +511,9 @@ function SessionChatInner(props: SessionChatProps) {
     const normalizedCacheRef = useRef<Map<string, { source: DecryptedMessage; normalized: NormalizedMessage | null }>>(new Map())
     const blocksByIdRef = useRef<Map<string, ChatBlock>>(new Map())
     const visibleGroupsRef = useRef<ToolGroupBlock[]>([])
+    // L3.1: first-unread target id. Updated during render so HappyThread's
+    // load-until-found loop always reads the latest value from the ref.
+    const firstUnreadTargetIdRef = useRef<string | null>(null)
     const [forceScrollToken, setForceScrollToken] = useState(0)
     const [outlineOpen, setOutlineOpen] = useState(props.initialOutlineOpen ?? false)
     useEffect(() => {
@@ -965,6 +1016,19 @@ function SessionChatInner(props: SessionChatProps) {
         visibleGroupsRef.current = visibleBlocks.filter(isToolGroupBlock)
     }, [visibleBlocks])
 
+    // L3.1: scan visibleBlocks (sidechains already folded into tool-call children,
+    // naturally skipped) for the first block with createdAt > lastSeenAt.
+    // Updated during render so HappyThread's load loop reads fresh on each iteration.
+    const lastSeenAtValue = props.lastSeenAt ?? 0
+    if (lastSeenAtValue > 0) {
+        const first = visibleBlocks.find((b) => b.createdAt > lastSeenAtValue)
+        firstUnreadTargetIdRef.current = first ? `${first.kind}:${first.id}` : null
+    } else {
+        firstUnreadTargetIdRef.current = null
+    }
+
+    const findFirstUnreadTargetId = useCallback(() => firstUnreadTargetIdRef.current, [])
+
     const outlineItems = useMemo(
         () => buildConversationOutline(reconciled.blocks),
         [reconciled.blocks]
@@ -1109,9 +1173,27 @@ function SessionChatInner(props: SessionChatProps) {
 
     // Abort handler
     const handleAbort = useCallback(async () => {
+        // Mirror Claude Code's quick-Esc: retract the most-recent user message
+        // if it has not been consumed by the agent yet. findRetractableMessage
+        // encodes the safety gates (server-confirmed, unconsumed, not
+        // scheduled, not failed, no attachments). Once consumed the message is
+        // committed and cannot be retracted, same as Claude Code.
+        const sid = props.session.id
+        const retractable = findRetractableMessage(getMessageWindowState(sid).messages)
+        if (retractable) {
+            try {
+                const result = await props.api.cancelMessage(sid, retractable.id)
+                if (result.status === 'cancelled') {
+                    removeOptimisticMessage(sid, retractable.localId ?? retractable.id)
+                }
+            } catch {
+                // cancelMessage only deletes unconsumed rows; on a race or if
+                // the agent already consumed it, fall through to a normal interrupt.
+            }
+        }
         await abortSession()
         props.onRefresh()
-    }, [abortSession, props.onRefresh])
+    }, [abortSession, props.onRefresh, props.api, props.session.id])
 
     // Switch to remote handler
     const handleSwitchToRemote = useCallback(async () => {
@@ -1283,6 +1365,10 @@ function SessionChatInner(props: SessionChatProps) {
                         outlineTitle={outlineTitle}
                         outlineItems={outlineItems}
                         onOutlineOpenChange={setOutlineOpen}
+                        findFirstUnreadTargetId={findFirstUnreadTargetId}
+                        onLocateSettled={props.onLocateSettled}
+                        lastSeenAt={props.lastSeenAt}
+                        locateResetToken={props.locateResetToken}
                     />
 
                     {codexCollaborationModeSupported && codexModelsState.error ? (
