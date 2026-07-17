@@ -20,6 +20,7 @@ function makeSession(overrides: Partial<SessionSummary> & { id: string }): Sessi
         active: false,
         thinking: false,
         activeAt: 0,
+        createdAt: 0,
         updatedAt: 0,
         metadata: null,
         todoProgress: null,
@@ -83,8 +84,8 @@ describe('getWorktreeSessionLabel', () => {
 describe('deduplicateSessionsByAgentId', () => {
     it('deduplicates sessions with the same agentSessionId', () => {
         const sessions = [
-            makeSession({ id: 'a', metadata: { path: '/p', agentSessionId: 'thread-1' }, updatedAt: 100 }),
-            makeSession({ id: 'b', metadata: { path: '/p', agentSessionId: 'thread-1' }, updatedAt: 200 })
+            makeSession({ id: 'a', metadata: { path: '/p', agentSessionId: 'thread-1' }, createdAt: 100 }),
+            makeSession({ id: 'b', metadata: { path: '/p', agentSessionId: 'thread-1' }, createdAt: 200 })
         ]
         const result = deduplicateSessionsByAgentId(sessions)
         expect(result).toHaveLength(1)
@@ -152,10 +153,10 @@ describe('deduplicateSessionsByAgentId', () => {
 
     it('deduplicates independently across different agentSessionIds', () => {
         const sessions = [
-            makeSession({ id: 'a', metadata: { path: '/p', agentSessionId: 'thread-1' }, updatedAt: 100 }),
-            makeSession({ id: 'b', metadata: { path: '/p', agentSessionId: 'thread-1' }, updatedAt: 200 }),
-            makeSession({ id: 'c', metadata: { path: '/p', agentSessionId: 'thread-2' }, updatedAt: 100 }),
-            makeSession({ id: 'd', metadata: { path: '/p', agentSessionId: 'thread-2' }, updatedAt: 200 })
+            makeSession({ id: 'a', metadata: { path: '/p', agentSessionId: 'thread-1' }, createdAt: 100 }),
+            makeSession({ id: 'b', metadata: { path: '/p', agentSessionId: 'thread-1' }, createdAt: 200 }),
+            makeSession({ id: 'c', metadata: { path: '/p', agentSessionId: 'thread-2' }, createdAt: 100 }),
+            makeSession({ id: 'd', metadata: { path: '/p', agentSessionId: 'thread-2' }, createdAt: 200 })
         ]
         const result = deduplicateSessionsByAgentId(sessions)
         expect(result).toHaveLength(2)
@@ -248,12 +249,12 @@ describe('prepareSidebarSessions', () => {
             makeSession({
                 id: 'older',
                 metadata: { path: '/work/hapi', agentSessionId: 'thread-1' },
-                updatedAt: 100
+                createdAt: 100
             }),
             makeSession({
                 id: 'newer',
                 metadata: { path: '/work/hapi', agentSessionId: 'thread-1' },
-                updatedAt: 200
+                createdAt: 200
             })
         ]
 

@@ -69,20 +69,8 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
 
         const namespace = c.get('namespace')
         const sessionRecords = engine.getSessionsByNamespace(namespace)
-            .sort((a, b) => {
-                // Active sessions first
-                if (a.active !== b.active) {
-                    return a.active ? -1 : 1
-                }
-                // Within active sessions, sort by pending requests count
-                const aPending = getPendingCount(a)
-                const bPending = getPendingCount(b)
-                if (a.active && aPending !== bPending) {
-                    return bPending - aPending
-                }
-                // Then by updatedAt
-                return b.updatedAt - a.updatedAt
-            })
+            // L1.2：纯创建时间降序（去 active/pending 优先；会话更新不再跳顶）
+            .sort((a, b) => b.createdAt - a.createdAt)
         const scheduledCounts = engine.getFutureScheduledMessageCounts(sessionRecords.map((session) => session.id))
         const nextScheduledAt = engine.getNextScheduledAtBySessionIds(sessionRecords.map((session) => session.id))
         const sessions = sessionRecords.map((session) => {

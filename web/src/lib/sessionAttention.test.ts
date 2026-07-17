@@ -7,6 +7,7 @@ function makeSummary(overrides: Partial<SessionSummary> & { id: string }): Sessi
         active: true,
         thinking: false,
         activeAt: 0,
+        createdAt: 0,
         updatedAt: 1000,
         metadata: null,
         todoProgress: null,
