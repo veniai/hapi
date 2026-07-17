@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
     applyModelChangeWithReasoningRollback,
     buildGoalStateMessages,
+    findRetractableMessage,
     isScratchlistHotkeyBlockedTarget,
     isScratchlistToggleHotkey,
     resolvePiContextWindow,
@@ -9,7 +10,119 @@ import {
     shouldRouteToScratchlist,
 } from './SessionChat'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
-import type { AttachmentMetadata, DecryptedMessage } from '@/types/api'
+import type { AttachmentMetadata, DecryptedMessage, MessageStatus } from '@/types/api'
+
+describe('findRetractableMessage', () => {
+    function attachment(): AttachmentMetadata {
+        return {
+            id: 'attach-1',
+            filename: 'a.png',
+            mimeType: 'image/png',
+            size: 1,
+            path: '/tmp/a.png',
+        }
+    }
+
+    function makeMsg(opts: {
+        id?: string
+        localId?: string | null
+        role?: 'user' | 'assistant'
+        invokedAt?: number | null
+        scheduledAt?: number | null
+        status?: MessageStatus
+        attachments?: AttachmentMetadata[]
+    }): DecryptedMessage {
+        const role = opts.role ?? 'user'
+        return {
+            id: opts.id ?? 'srv-1',
+            seq: null,
+            localId: opts.localId ?? null,
+            content: {
+                role,
+                content: { type: 'text', text: 'hi', attachments: opts.attachments },
+            },
+            createdAt: 1000,
+            invokedAt: opts.invokedAt ?? null,
+            scheduledAt: opts.scheduledAt ?? null,
+            status: opts.status,
+            originalText: 'hi',
+        } as unknown as DecryptedMessage
+    }
+
+    it('returns undefined when there are no messages', () => {
+        expect(findRetractableMessage([])).toBeUndefined()
+    })
+
+    it('returns undefined when the only user message is already consumed', () => {
+        const m = makeMsg({ id: 'srv-1', localId: 'loc-1', invokedAt: 1000 })
+        expect(findRetractableMessage([m])).toBeUndefined()
+    })
+
+    it('returns an unconsumed, server-confirmed user message', () => {
+        const m = makeMsg({ id: 'srv-1', localId: 'loc-1', invokedAt: null })
+        expect(findRetractableMessage([m])).toBe(m)
+    })
+
+    it('returns the most recent unconsumed message when several exist', () => {
+        const older = makeMsg({ id: 'srv-1', localId: 'loc-1', invokedAt: null })
+        const newer = makeMsg({ id: 'srv-2', localId: 'loc-2', invokedAt: null })
+        expect(findRetractableMessage([older, newer])).toBe(newer)
+    })
+
+    it('skips a newer consumed message and retracts the older unconsumed one', () => {
+        const older = makeMsg({ id: 'srv-1', localId: 'loc-1', invokedAt: null })
+        const newer = makeMsg({ id: 'srv-2', localId: 'loc-2', invokedAt: 2000 })
+        expect(findRetractableMessage([older, newer])).toBe(older)
+    })
+
+    it('skips future scheduled sends', () => {
+        const m = makeMsg({
+            id: 'srv-1',
+            localId: 'loc-1',
+            invokedAt: null,
+            scheduledAt: Date.now() + 60_000,
+        })
+        expect(findRetractableMessage([m])).toBeUndefined()
+    })
+
+    it('skips failed retries', () => {
+        const m = makeMsg({ id: 'srv-1', localId: 'loc-1', invokedAt: null, status: 'failed' })
+        expect(findRetractableMessage([m])).toBeUndefined()
+    })
+
+    // Regression: queued messages live in the floating bar (not the main
+    // thread), so cancelRun does not restore their text. Retracting one would
+    // delete it from the hub and silently lose the text.
+    it('skips queued (sent-while-busy) messages — their text is not restored by cancelRun', () => {
+        const m = makeMsg({ id: 'srv-1', localId: 'loc-1', invokedAt: null, status: 'queued' })
+        expect(findRetractableMessage([m])).toBeUndefined()
+    })
+
+    it('skips non-user messages', () => {
+        const m = makeMsg({ id: 'srv-1', localId: 'loc-1', role: 'assistant', invokedAt: null })
+        expect(findRetractableMessage([m])).toBeUndefined()
+    })
+
+    // Regression: pre-echo race — cancelQueuedMessage reports an absent row as
+    // 'cancelled', so a still-in-flight optimistic row (id === localId) must
+    // NOT be retracted or the racing POST + SSE resurrects it.
+    it('skips in-flight optimistic rows (id === localId) to avoid the pre-echo race', () => {
+        const m = makeMsg({ id: 'loc-1', localId: 'loc-1', invokedAt: null })
+        expect(findRetractableMessage([m])).toBeUndefined()
+    })
+
+    // Regression: cancelRun restores only text, not attachment metadata, so
+    // retracting would drop the only attachment copy.
+    it('skips attachment messages (attachments are not restored by cancelRun)', () => {
+        const m = makeMsg({
+            id: 'srv-1',
+            localId: 'loc-1',
+            invokedAt: null,
+            attachments: [attachment()],
+        })
+        expect(findRetractableMessage([m])).toBeUndefined()
+    })
+})
 
 describe('applyModelChangeWithReasoningRollback', () => {
     it('restores the previous effort when the model switch fails after clearing it', async () => {
