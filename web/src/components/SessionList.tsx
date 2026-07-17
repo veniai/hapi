@@ -16,6 +16,7 @@ import { useSessionListStatusMode } from '@/hooks/useSessionListStatusMode'
 import { useShowActiveSessionsOnly } from '@/hooks/useShowActiveSessionsOnly'
 import { classifySessionAttention } from '@/lib/sessionAttention'
 import { getSessionLastSeenAt } from '@/lib/sessionLastSeen'
+import { useSessionLastSeenVersion } from '@/hooks/useSessionLastSeen'
 import { getAttentionLabel, SessionAttentionIndicator } from '@/components/SessionAttentionIndicator'
 import { HoverTooltip, SESSION_ROW_TOOLTIP_FOCUS_CLASS, useSessionRowTooltipIds } from '@/components/HoverTooltip'
 import { formatRelativeTime } from '@/lib/relativeTime'
@@ -34,7 +35,7 @@ type SessionGroup = {
     displayName: string
     machineId: string | null
     sessions: SessionSummary[]
-    latestUpdatedAt: number
+    latestCreatedAt: number
     hasActiveSession: boolean
 }
 
@@ -96,7 +97,7 @@ type MachineGroup = {
     projectGroups: SessionGroup[]
     totalSessions: number
     hasActiveSession: boolean
-    latestUpdatedAt: number
+    latestCreatedAt: number
 }
 
 function getGroupDisplayName(directory: string): string {
@@ -143,7 +144,7 @@ export function deduplicateSessionsByAgentId(sessions: SessionSummary[], selecte
             // Among inactive duplicates, keep the selected one visible
             if (a.id === selectedSessionId) return -1
             if (b.id === selectedSessionId) return 1
-            return b.updatedAt - a.updatedAt
+            return b.createdAt - a.createdAt
         })
         result.push(group[0])
     }
@@ -212,14 +213,9 @@ function groupSessionsByDirectory(sessions: SessionSummary[]): SessionGroup[] {
 
     return Array.from(groups.entries())
         .map(([key, group]) => {
-            const sortedSessions = [...group.sessions].sort((a, b) => {
-                const rankA = a.active ? (a.pendingRequestsCount > 0 ? 0 : 1) : 2
-                const rankB = b.active ? (b.pendingRequestsCount > 0 ? 0 : 1) : 2
-                if (rankA !== rankB) return rankA - rankB
-                return b.updatedAt - a.updatedAt
-            })
-            const latestUpdatedAt = group.sessions.reduce(
-                (max, s) => (s.updatedAt > max ? s.updatedAt : max),
+            const sortedSessions = [...group.sessions].sort((a, b) => b.createdAt - a.createdAt)
+            const latestCreatedAt = group.sessions.reduce(
+                (max, s) => (s.createdAt > max ? s.createdAt : max),
                 -Infinity
             )
             const hasActiveSession = group.sessions.some(s => s.active)
@@ -231,16 +227,11 @@ function groupSessionsByDirectory(sessions: SessionSummary[]): SessionGroup[] {
                 displayName,
                 machineId: group.machineId,
                 sessions: sortedSessions,
-                latestUpdatedAt,
+                latestCreatedAt,
                 hasActiveSession
             }
         })
-        .sort((a, b) => {
-            if (a.hasActiveSession !== b.hasActiveSession) {
-                return a.hasActiveSession ? -1 : 1
-            }
-            return b.latestUpdatedAt - a.latestUpdatedAt
-        })
+        .sort((a, b) => b.latestCreatedAt - a.latestCreatedAt)
 }
 
 
@@ -281,19 +272,16 @@ function groupByMachine(
                 projectGroups: [],
                 totalSessions: 0,
                 hasActiveSession: false,
-                latestUpdatedAt: 0,
+                latestCreatedAt: 0,
             }
             map.set(key, mg)
         }
         mg.projectGroups.push(g)
         mg.totalSessions += g.sessions.length
         if (g.hasActiveSession) mg.hasActiveSession = true
-        if (g.latestUpdatedAt > mg.latestUpdatedAt) mg.latestUpdatedAt = g.latestUpdatedAt
+        if (g.latestCreatedAt > mg.latestCreatedAt) mg.latestCreatedAt = g.latestCreatedAt
     }
-    return [...map.values()].sort((a, b) => {
-        if (a.hasActiveSession !== b.hasActiveSession) return a.hasActiveSession ? -1 : 1
-        return b.latestUpdatedAt - a.latestUpdatedAt
-    })
+    return [...map.values()].sort((a, b) => b.latestCreatedAt - a.latestCreatedAt)
 }
 
 function CopyPathButton({ path, className }: { path: string; className?: string }) {
@@ -652,14 +640,19 @@ function SessionItem(props: {
     const sessionName = getSessionTitle(s)
     const worktreeLabel = getWorktreeSessionLabel(s)
     const todoProgress = getTodoProgress(s)
+    // L1.2：时间未读变红——订阅 lastSeen 水位变化（同 tab 事件 + 跨 tab storage），
+    // 响应式重算。排除 thinking 会话与当前选中会话（沿用 sessionAttention 短路语义）。
+    const lastSeenVersion = useSessionLastSeenVersion()
+    const lastSeenAt = useMemo(() => getSessionLastSeenAt(s.id), [s.id, lastSeenVersion])
+    const isUnreadTime = s.updatedAt > lastSeenAt && !s.thinking && !selected
     const attention = useMemo(
         () => showDetailedStatus
             ? classifySessionAttention(s, {
                 selected,
-                lastSeenAt: getSessionLastSeenAt(s.id)
+                lastSeenAt
             })
             : null,
-        [s, selected, showDetailedStatus]
+        [s, selected, showDetailedStatus, lastSeenAt]
     )
     const attentionLabel = attention ? getAttentionLabel(attention, t) : null
     const scheduledLabel = s.futureScheduledMessageCount > 1
@@ -726,7 +719,7 @@ function SessionItem(props: {
                                 {t('session.item.pending')} {s.pendingRequestsCount}
                             </span>
                         ) : null}
-                        <span className="text-[var(--app-hint)]">
+                        <span className={isUnreadTime ? 'text-red-500' : 'text-[var(--app-hint)]'}>
                             {getSessionTimeLabel(s, t)}
                         </span>
                     </div>

@@ -46,13 +46,8 @@ const RECONNECT_JITTER_MS = 500
 const INVALIDATION_BATCH_MS = 16
 
 function sortSessionSummaries(left: SessionSummary, right: SessionSummary): number {
-    if (left.active !== right.active) {
-        return left.active ? -1 : 1
-    }
-    if (left.active && left.pendingRequestsCount !== right.pendingRequestsCount) {
-        return right.pendingRequestsCount - left.pendingRequestsCount
-    }
-    return right.updatedAt - left.updatedAt
+    // L1.2：纯创建时间降序（去 active/pending 优先；会话更新不再跳顶）
+    return right.createdAt - left.createdAt
 }
 
 function isSessionRecord(value: unknown): value is Session {
