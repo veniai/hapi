@@ -19,12 +19,13 @@ export class DingtalkChannel implements NotificationChannel {
     constructor(
         private readonly webhook: string,
         private readonly secret?: string,
-        private readonly keyword?: string
+        private readonly keyword?: string,
+        private readonly publicUrl?: string
     ) {}
 
     async sendReady(session: Session): Promise<void> {
         if (!session.active) return
-        await this.send(`${getSessionName(session)}·空闲`)
+        await this.send(`${getSessionName(session)}·空闲`, session.id)
     }
 
     async sendPermissionRequest(session: Session): Promise<void> {
@@ -33,7 +34,7 @@ export class DingtalkChannel implements NotificationChannel {
             ? Object.values(session.agentState.requests)[0]
             : null
         const tool = request?.tool ? ` ${request.tool}` : ''
-        await this.send(`${getSessionName(session)}·待审批${tool}`)
+        await this.send(`${getSessionName(session)}·待审批${tool}`, session.id)
     }
 
     async sendTaskNotification(session: Session, notification: TaskNotification): Promise<void> {
@@ -42,22 +43,27 @@ export class DingtalkChannel implements NotificationChannel {
         const isFailure = status === 'failed' || status === 'error' || status === 'killed' || status === 'aborted'
         const label = isFailure ? '失败' : '完成'
         const preview = notification.summary ? ` ${truncate(notification.summary, 60)}` : ''
-        await this.send(`${getSessionName(session)}·${label}${preview}`)
+        await this.send(`${getSessionName(session)}·${label}${preview}`, session.id)
     }
 
     async sendSessionCompletion(session: Session, _reason: SessionEndReason): Promise<void> {
-        await this.send(`${getSessionName(session)}·完成`)
+        await this.send(`${getSessionName(session)}·完成`, session.id)
     }
 
     /**
-     * 发钉钉：webhook + 可选 HMAC-SHA256 签名（timestamp+sign 查询参数）+ 关键词过滤
-     * （钉钉机器人安全设置；content 须含关键词，否则被拒）。payload 用 text
-     * （L3.3 deep link 再改 markdown 支持可点链接）。
+     * 发钉钉：webhook + 可选 HMAC-SHA256 签名（timestamp+sign 查询参数）+ 关键词过滤。
+     * payload 用 markdown（L3.3）：支持「打开会话」可点链接（text 消息不支持 markdown 链接）。
      */
-    private async send(content: string): Promise<void> {
-        const finalContent = this.keyword && !content.includes(this.keyword)
-            ? `${content} ${this.keyword}`
+    private async send(content: string, sessionId?: string): Promise<void> {
+        const sessionUrl = sessionId && this.publicUrl
+            ? buildSessionUrl(this.publicUrl, sessionId)
+            : null
+        const text = sessionUrl
+            ? `${content}\n\n[打开会话](${sessionUrl})`
             : content
+        const finalText = this.keyword && !text.includes(this.keyword)
+            ? `${text} ${this.keyword}`
+            : text
 
         let url = this.webhook
         if (this.secret) {
@@ -70,14 +76,22 @@ export class DingtalkChannel implements NotificationChannel {
         const response = await fetch(url, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ msgtype: 'text', text: { content: finalContent } })
+            body: JSON.stringify({
+                msgtype: 'markdown',
+                markdown: { title: content.slice(0, 20), text: finalText }
+            })
         })
 
         if (!response.ok) {
-            const text = await response.text().catch(() => '')
-            throw new Error(`钉钉发送失败: HTTP ${response.status} ${response.statusText}${text ? ` - ${text}` : ''}`)
+            const errText = await response.text().catch(() => '')
+            throw new Error(`钉钉发送失败: HTTP ${response.status} ${response.statusText}${errText ? ` - ${errText}` : ''}`)
         }
     }
+}
+
+function buildSessionUrl(baseUrl: string, sessionId: string): string {
+    const normalized = baseUrl.replace(/\/+$/, '')
+    return `${normalized}/sessions/${sessionId}`
 }
 
 function truncate(text: string, max: number): string {
