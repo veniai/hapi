@@ -491,7 +491,9 @@ export function getVisibleSessionPreview(
 
     const requiredIds = new Set<string>()
     for (const session of sessions) {
-        if (session.pendingRequestsCount > 0) requiredIds.add(session.id)
+        if (session.pendingRequestsCount > 0 && session.metadata?.lifecycleState !== 'archived') {
+            requiredIds.add(session.id)
+        }
     }
     if (options.selectedSessionId && sessions.some(session => session.id === options.selectedSessionId)) {
         requiredIds.add(options.selectedSessionId)
@@ -643,7 +645,15 @@ function SessionItem(props: {
     const todoProgress = getTodoProgress(s)
     // The list owns one last-seen subscription and passes each row its value.
     // Per-row subscriptions made every watermark update rerender the whole list N times.
-    const isUnreadTime = s.updatedAt > lastSeenAt && !s.thinking && !selected
+    const isUnread = s.updatedAt > lastSeenAt
+        && !s.thinking
+        && !selected
+        && s.metadata?.lifecycleState !== 'archived'
+    const sessionTitleColor = isUnread
+        ? 'text-red-500'
+        : s.active
+            ? 'text-[var(--app-fg)]'
+            : 'text-[var(--app-hint)]'
     const attention = useMemo(
         () => showDetailedStatus
             ? classifySessionAttention(s, {
@@ -675,7 +685,7 @@ function SessionItem(props: {
                 <div className={`flex items-center justify-between gap-3 ${!s.active ? 'opacity-50' : ''}`}>
                     <div className="flex items-center gap-2 min-w-0">
                         <AgentFlavorIcon flavor={s.metadata?.flavor} className="h-4 w-4 shrink-0" />
-                        <div className={`truncate text-sm font-medium ${s.active ? 'text-[var(--app-fg)]' : 'text-[var(--app-hint)]'}`}>
+                        <div className={`truncate text-sm font-medium ${sessionTitleColor}`}>
                             {sessionName}
                         </div>
                         {s.active && s.thinking ? (
@@ -718,7 +728,7 @@ function SessionItem(props: {
                                 {t('session.item.pending')} {s.pendingRequestsCount}
                             </span>
                         ) : null}
-                        <span className={isUnreadTime ? 'text-red-500' : 'text-[var(--app-hint)]'}>
+                        <span className={isUnread ? 'text-red-500' : 'text-[var(--app-hint)]'}>
                             {getSessionTimeLabel(s, t)}
                         </span>
                     </div>
@@ -1052,7 +1062,7 @@ export function SessionList(props: {
                 </div>
             ) : null}
 
-            <div className="flex flex-col gap-3 px-2 pt-1 pb-2">
+            <div data-session-list-level="machine" className="flex flex-col gap-3 px-1 pt-1 pb-2">
                 {machineGroups.map((mg) => {
                     const machineCollapsed = isMachineCollapsed(mg)
                     const machine = mg.machineId ? machinesById[mg.machineId] : undefined
@@ -1074,7 +1084,7 @@ export function SessionList(props: {
                             {/* Level 2: Projects */}
                             <div className="collapsible-panel" data-open={!machineCollapsed || undefined}>
                                 <div className="collapsible-inner">
-                                <div className="flex flex-col ml-3.5 pl-1 mt-0.5">
+                                <div data-session-list-level="project" className="flex flex-col ml-2 mt-0.5">
                                     {mg.projectGroups.map((group) => {
                                         const isCollapsed = isGroupCollapsed(group)
                                         const visibleGroupSessions = getVisibleGroupSessions(group)
@@ -1119,7 +1129,7 @@ export function SessionList(props: {
                                                 {/* Level 3: Sessions */}
                                                 <div className="collapsible-panel" data-open={!isCollapsed || undefined}>
                                                     <div className="collapsible-inner">
-                                                    <div className="flex flex-col gap-0.5 ml-3 pl-1 pr-1 py-1">
+                                                    <div data-session-list-level="session" className="flex flex-col gap-0.5 ml-2 pr-1 py-1">
                                                         {visibleGroupSessions.map((s) => (
                                                             <SessionItem
                                                                 key={s.id}

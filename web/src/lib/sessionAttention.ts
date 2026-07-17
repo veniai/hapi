@@ -10,7 +10,7 @@ export function classifySessionAttention(
     summary: SessionSummary,
     options: { selected: boolean; lastSeenAt: number }
 ): SessionAttention | null {
-    if (options.selected || summary.thinking) {
+    if (options.selected || summary.thinking || summary.metadata?.lifecycleState === 'archived') {
         return null
     }
 
