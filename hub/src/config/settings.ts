@@ -16,6 +16,10 @@ export interface Settings {
     telegramNotification?: boolean
     serverChanSendKey?: string
     serverChanNotification?: boolean
+    dingtalkWebhook?: string
+    dingtalkSecret?: string
+    dingtalkKeyword?: string
+    dingtalkNotification?: boolean
     listenHost?: string
     listenPort?: number
     publicUrl?: string

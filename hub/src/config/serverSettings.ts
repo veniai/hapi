@@ -17,6 +17,10 @@ export interface ServerSettings {
     telegramNotification: boolean
     serverChanSendKey: string | null
     serverChanNotification: boolean
+    dingtalkWebhook: string | null
+    dingtalkSecret: string | null
+    dingtalkKeyword: string | null
+    dingtalkNotification: boolean
     listenHost: string
     listenPort: number
     publicUrl: string
@@ -30,6 +34,10 @@ export interface ServerSettingsResult {
         telegramNotification: 'env' | 'file' | 'default'
         serverChanSendKey: 'env' | 'file' | 'default'
         serverChanNotification: 'env' | 'file' | 'default'
+        dingtalkWebhook: 'env' | 'file' | 'default'
+        dingtalkSecret: 'env' | 'file' | 'default'
+        dingtalkKeyword: 'env' | 'file' | 'default'
+        dingtalkNotification: 'env' | 'file' | 'default'
         listenHost: 'env' | 'file' | 'default'
         listenPort: 'env' | 'file' | 'default'
         publicUrl: 'env' | 'file' | 'default'
@@ -107,6 +115,10 @@ export async function loadServerSettings(dataDir: string): Promise<ServerSetting
         telegramNotification: 'default',
         serverChanSendKey: 'default',
         serverChanNotification: 'default',
+        dingtalkWebhook: 'default',
+        dingtalkSecret: 'default',
+        dingtalkKeyword: 'default',
+        dingtalkNotification: 'default',
         listenHost: 'default',
         listenPort: 'default',
         publicUrl: 'default',
@@ -166,6 +178,62 @@ export async function loadServerSettings(dataDir: string): Promise<ServerSetting
     } else if (settings.serverChanNotification !== undefined) {
         serverChanNotification = settings.serverChanNotification
         sources.serverChanNotification = 'file'
+    }
+
+    // dingtalkWebhook: env > file > null
+    let dingtalkWebhook: string | null = null
+    if (process.env.DINGTALK_WEBHOOK) {
+        dingtalkWebhook = process.env.DINGTALK_WEBHOOK
+        sources.dingtalkWebhook = 'env'
+        if (settings.dingtalkWebhook === undefined) {
+            settings.dingtalkWebhook = dingtalkWebhook
+            needsSave = true
+        }
+    } else if (settings.dingtalkWebhook !== undefined) {
+        dingtalkWebhook = settings.dingtalkWebhook
+        sources.dingtalkWebhook = 'file'
+    }
+
+    // dingtalkSecret: env > file > null
+    let dingtalkSecret: string | null = null
+    if (process.env.DINGTALK_SECRET) {
+        dingtalkSecret = process.env.DINGTALK_SECRET
+        sources.dingtalkSecret = 'env'
+        if (settings.dingtalkSecret === undefined) {
+            settings.dingtalkSecret = dingtalkSecret
+            needsSave = true
+        }
+    } else if (settings.dingtalkSecret !== undefined) {
+        dingtalkSecret = settings.dingtalkSecret
+        sources.dingtalkSecret = 'file'
+    }
+
+    // dingtalkKeyword: env > file > null
+    let dingtalkKeyword: string | null = null
+    if (process.env.DINGTALK_KEYWORD) {
+        dingtalkKeyword = process.env.DINGTALK_KEYWORD
+        sources.dingtalkKeyword = 'env'
+        if (settings.dingtalkKeyword === undefined) {
+            settings.dingtalkKeyword = dingtalkKeyword
+            needsSave = true
+        }
+    } else if (settings.dingtalkKeyword !== undefined) {
+        dingtalkKeyword = settings.dingtalkKeyword
+        sources.dingtalkKeyword = 'file'
+    }
+
+    // dingtalkNotification: env > file > true
+    let dingtalkNotification = true
+    if (process.env.DINGTALK_NOTIFICATION !== undefined) {
+        dingtalkNotification = process.env.DINGTALK_NOTIFICATION === 'true'
+        sources.dingtalkNotification = 'env'
+        if (settings.dingtalkNotification === undefined) {
+            settings.dingtalkNotification = dingtalkNotification
+            needsSave = true
+        }
+    } else if (settings.dingtalkNotification !== undefined) {
+        dingtalkNotification = settings.dingtalkNotification
+        sources.dingtalkNotification = 'file'
     }
 
     // listenHost: env > file > default
@@ -241,6 +309,10 @@ export async function loadServerSettings(dataDir: string): Promise<ServerSetting
             telegramNotification,
             serverChanSendKey,
             serverChanNotification,
+            dingtalkWebhook,
+            dingtalkSecret,
+            dingtalkKeyword,
+            dingtalkNotification,
             listenHost,
             listenPort,
             publicUrl,
