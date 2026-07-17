@@ -93,7 +93,11 @@ L2.1 钉钉 ──────────────────→ L3.3（通
 
 **验证命令**：`bun run typecheck:cli && bun run test:cli` + `bun run test:web`（reducer 单测）。
 
-**人工步骤**：⚠️ **两项 GLM 运行时语义需真实流量校准（goal 做不了）**：①`result.usage` 是本轮累计还是 last-call（预期累计；若累计 ctx 偏高但远优于 0）；②`result.modelUsage` 是否带 contextWindow、key 是否 = resolvedModel（交互式 CLI 正常 ⇒ 强信号已带；不符则 ctx 显示 "N/null"）。用一轮 + 多工具轮 fixture 校准。
+**人工步骤**：✅ **GLM 运行时语义已实测确认**（2026-07，`claude -p --output-format stream-json` 连 GLM）：
+- result 带真实 usage（非 `{0,0}`）：单轮 `13411/3/14784`、多工具轮(num_turns=3) `41402/101/18304`。
+- `result.modelUsage` 带 `contextWindow: 1000000`，key = `glm-5.2[1m]`（= `resolvedContextWindowKey`，carrier 能命中，**不会 "N/null"**）。
+- 流式 assistant usage 确为 `{0,0}` 占位（印证根因）。
+- 多工具轮 contextSize ≈ 59706（~6% ctx），量级像 **last-call**（ctx 显示准确、非偏高）；未 100% 排除累计，但不阻断——落地后看实际 ctx 显示是否偏高再定。
 
 ---
 
@@ -422,10 +426,9 @@ L2.1 钉钉 ──────────────────→ L3.3（通
 
 ---
 
-# 待实测项（goal 做不了，人工补）
+# 待实测项
 
-- **修复A · `result.usage` 累计性**（L0.1）：多工具轮 fixture 实测是本轮累计还是 last-call；若累计 ctx 偏高但远优于 0。
-- **修复A · `context_window` 分母**（L0.1）：真实 GLM fixture 确认 `result.modelUsage` 带 contextWindow 且 key = resolvedModel；否则 ctx 显示 "N/null"。
+- **修复A · GLM 运行时语义**（L0.1）：✅ **已实测**（2026-07，`claude -p stream-json` 连 GLM）：result 带真实 usage（单轮 13411/3/14784、多工具轮 41402/101/18304）+ `modelUsage.contextWindow=1000000` + key `glm-5.2[1m]` 命中 `resolvedContextWindowKey`；流式 assistant usage `{0,0}` 占位（根因印证）。**剩**：result.usage 累计性（多轮量级像 last-call、ctx ~6% 合理），落地后看 ctx 是否偏高再定——不阻断。
 
 ---
 
