@@ -1,12 +1,12 @@
 # AGENTS.md
 
-Work style: telegraph; noun-phrases ok; drop grammar;
+Output style (commits/notes/summaries): telegraph; noun-phrases ok; drop grammar.
 
 Short guide for AI agents in this repo. Prefer progressive loading: start with the root README, then package READMEs as needed.
 
 ## What is HAPI?
 
-Local-first platform for running AI coding agents (Claude Code, Codex, Gemini) with remote control via web/phone. CLI wraps agents and connects to hub; hub serves web app and handles real-time sync.
+Local-first platform for running AI coding agents (Claude Code, Codex, Cursor, Grok, Gemini, OpenCode) with remote control via web/phone. CLI wraps agents and connects to hub; hub serves web app and handles real-time sync.
 
 ## Repo layout
 
@@ -63,11 +63,36 @@ Bun workspaces; `shared` consumed by cli, hub, web.
 ## Common commands (repo root)
 
 ```bash
-bun typecheck           # All packages
-bun run test            # cli + hub tests
-bun run dev             # hub + web concurrently
-bun run build:single-exe # All-in-one binary
+bun typecheck             # All packages
+bun run test              # All packages (cli + hub + web + shared)
+bun run test:e2e          # Playwright e2e
+bun run dev               # hub + web concurrently
+bun run build:web         # Web dist (deploy step for web)
+bun run build:single-exe  # All-in-one binary
 ```
+
+## Branches & deploy (this fork)
+
+Live = systemd user services running **deploy branch** source from worktree `/home/claw/deploy/hapi`. Public via Cloudflare at `hapi.zhetengde.xyz`.
+
+| service | runs | to apply a change |
+|---|---|---|
+| `hapi-hub` | `hub/src/index.ts` (source) | `systemctl --user restart hapi-hub` |
+| `hapi-web` | built `web/dist` via `vite preview` | `bun run build:web` → `restart hapi-web` |
+| `hapi-runner` | `cli/src/index.ts runner` (source) | `systemctl --user restart hapi-runner` |
+
+Branches: `main` → tracks `upstream/main`; `deploy` → live, worktree `/home/claw/deploy/hapi`; `work/current` → scratch sandbox (no remote, safe to break; changes here do NOT reach live).
+
+### Change → live
+
+1. Develop on `work/current`; verify `bun typecheck && bun run test`.
+2. Move to deploy: `cd /home/claw/deploy/hapi && git merge work/current` (or `git cherry-pick <sha>`).
+3. Apply by scope: web → `bun run build:web` then restart `hapi-web`; hub → restart `hapi-hub`; cli → restart `hapi-runner`; shared → restart all three. (hub/cli run source — no build needed.)
+4. Restarting `hapi-hub`/`hapi-runner` interrupts running agent sessions.
+5. Verify at `hapi.zhetengde.xyz` (or `localhost:3006` / `:5173`).
+6. Sync upstream periodically: `git fetch upstream`; merge `upstream/main` → `main` → `deploy`.
+
+> `bun run dev` collides with prod ports 3006/5173 — stop prod services first or use alt port.
 
 ## Key source dirs
 
@@ -111,7 +136,7 @@ bun run build:single-exe # All-in-one binary
 
 ## Pre-push self-review (agents)
 
-Before commit/push/PR: use the **`pre-push-review`** skill (`~/.cursor/skills/pre-push-review/`).
+Before commit/push/PR:
 
 1. **Mechanical:** `bun typecheck && bun run test` (matches `.github/workflows/test.yml`)
 2. **Logic:** skim `git diff origin/main...HEAD`; apply `.github/prompts/codex-pr-review.md` as a local Major checklist (no Codex required)
@@ -119,12 +144,10 @@ Before commit/push/PR: use the **`pre-push-review`** skill (`~/.cursor/skills/pr
 
 ## Testing
 
-- Test framework: Vitest (via `bun run test`)
-- Test files: `*.test.ts` next to source
-- Run: `bun run test` (from root) or `bun run test` (from package)
-- Hub tests: `hub/src/**/*.test.ts`
-- CLI tests: `cli/src/**/*.test.ts`
-- No web tests currently
+- Framework: Vitest (via `bun run test`); e2e via Playwright (`bun run test:e2e`)
+- Test files: `*.test.ts(x)` next to source
+- Run all: `bun run test` (root); single package: `cd <pkg> && bun run test`
+- Hub: `hub/src/**/*.test.ts` · CLI: `cli/src/**/*.test.ts` · Web: `web/src/**/*.test.tsx` · Shared: `shared/src/**/*.test.ts`
 
 ## Common tasks
 
@@ -148,6 +171,18 @@ Before commit/push/PR: use the **`pre-push-review`** skill (`~/.cursor/skills/pr
 - **Permission modes**: `default`, `acceptEdits`, `auto`, `bypassPermissions`, `plan`
 - **Namespaces**: Multi-user isolation via `CLI_API_TOKEN:<namespace>` suffix
 
+## Schema changes (hub SQLite)
+
+Versioned migrations in `hub/src/store/index.ts`, driven by the SQLite `user_version` pragma; `SCHEMA_VERSION` (top of that file) is the target. To change schema (e.g. add a column):
+
+1. Add `migrateFromVNToV(N+1)` — **idempotent**: guard the `ALTER` on a column-existence check (`PRAGMA table_info`). See `migrateFromV9ToV10` for the pattern.
+2. Register it in `buildStepMigrations` (`N: () => this.migrateFromVNToV(N+1)`).
+3. Bump `SCHEMA_VERSION`.
+4. **Also add the column in `createSchema()`** — fresh DBs skip the ladder and go straight to `createSchema`.
+5. Add `migration-vN.test.ts` (see `migration-v9.test.ts`).
+
+Never edit schema without a migration step — hub throws `buildSchemaMismatchError` on `user_version` mismatch.
+
 ## Adding new web features — consider an FUE
 
 When you ship a non-essential feature (the 20% of sessions, not the 80%), consider wrapping its affordance in the generic First-User-Experience primitive so existing users discover it without a giant always-visible UI block.
@@ -155,35 +190,12 @@ When you ship a non-essential feature (the 20% of sessions, not the 80%), consid
 - **Hook**: `web/src/lib/use-fue.ts` — `useFue(featureId)` returns `{ status, engage, dismiss }`. Storage namespace `hapi.fue.v1.<featureId>` (one localStorage key per feature, isolated from any upstream onboarding flow).
 - **Components**: `web/src/components/Fue.tsx` — `<FueDot>` (small pulsing badge for the affordance) and `<FueCallout>` (portal-rendered popover with title/body + "Got it" affirmative-action dismiss).
 
-Pattern (~10 lines around the affordance):
-
-```tsx
-const fue = useFue('my-feature')
-const buttonRef = useRef<HTMLButtonElement>(null)
-return (
-    <>
-        <button ref={buttonRef} onClick={() => { fue.engage(); doThing() }}>
-            <Icon />
-            {fue.status !== 'acknowledged' ? <FueDot pulsing={fue.status === 'unseen'} /> : null}
-        </button>
-        {fue.status === 'engaging' ? (
-            <FueCallout
-                title={t('myFeature.fueTitle')}
-                body={t('myFeature.fueBody')}
-                onDismiss={fue.dismiss}
-                anchorRef={buttonRef}
-            />
-        ) : null}
-    </>
-)
-```
+Canonical example to copy (~10 lines around the affordance): `ScratchlistToggleButton` in `web/src/components/AssistantChat/ComposerButtons.tsx`.
 
 Rules:
-- Affirmative action only: there is no auto-timeout — user dismisses by clicking "Got it" (reading speed varies).
-- The FUE dot and any feature-specific badge (e.g. an entry counter) should be **mutually exclusive**: onboarding signal beats inventory signal until acknowledged.
+- Affirmative action only — no auto-timeout (reading speed varies); user dismisses via "Got it".
+- FUE dot is **mutually exclusive** with any feature-specific badge (e.g. an entry counter) until acknowledged: onboarding signal beats inventory signal.
 - Storage is opt-in per-feature; if upstream ships its own onboarding for a feature, just don't wrap that affordance.
-
-Canonical example: scratchlist toggle in `web/src/components/AssistantChat/ComposerButtons.tsx` (`ScratchlistToggleButton`).
 
 ## Critical Thinking
 
