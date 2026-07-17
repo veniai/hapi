@@ -15,6 +15,7 @@ import { VisibilityTracker } from './visibility/visibilityTracker'
 import { TunnelManager } from './tunnel'
 import { waitForTunnelTlsReady } from './tunnel/tlsGate'
 import { ServerChanChannel } from './serverchan/channel'
+import { DingtalkChannel } from './dingtalk/channel'
 import QRCode from 'qrcode'
 import type { Server as BunServer } from 'bun'
 import type { WebSocketData } from '@socket.io/bun-engine'
@@ -202,6 +203,15 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
 
     if (config.serverChanSendKey && config.serverChanNotification) {
         notificationChannels.push(new ServerChanChannel(config.serverChanSendKey, config.publicUrl))
+    }
+
+    // 钉钉机器人（L2.1）
+    if (config.dingtalkWebhook && config.dingtalkNotification) {
+        notificationChannels.push(new DingtalkChannel(
+            config.dingtalkWebhook,
+            config.dingtalkSecret ?? undefined,
+            config.dingtalkKeyword ?? undefined
+        ))
     }
 
     // Initialize Telegram bot (optional)

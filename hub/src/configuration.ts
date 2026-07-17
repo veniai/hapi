@@ -37,6 +37,10 @@ export interface ConfigSources {
     telegramNotification: ConfigSource
     serverChanSendKey: ConfigSource
     serverChanNotification: ConfigSource
+    dingtalkWebhook: ConfigSource
+    dingtalkSecret: ConfigSource
+    dingtalkKeyword: ConfigSource
+    dingtalkNotification: ConfigSource
     listenHost: ConfigSource
     listenPort: ConfigSource
     publicUrl: ConfigSource
@@ -59,6 +63,18 @@ class Configuration {
 
     /** Server酱 notifications enabled */
     public readonly serverChanNotification: boolean
+
+    /** 钉钉机器人 webhook */
+    public readonly dingtalkWebhook: string | null
+
+    /** 钉钉机器人加签 secret */
+    public readonly dingtalkSecret: string | null
+
+    /** 钉钉机器人关键词 */
+    public readonly dingtalkKeyword: string | null
+
+    /** 钉钉 notifications enabled */
+    public readonly dingtalkNotification: boolean
 
     /** CLI auth token (shared secret) */
     public cliApiToken: string
@@ -110,6 +126,10 @@ class Configuration {
         this.telegramNotification = serverSettings.telegramNotification
         this.serverChanSendKey = serverSettings.serverChanSendKey
         this.serverChanNotification = serverSettings.serverChanNotification
+        this.dingtalkWebhook = serverSettings.dingtalkWebhook
+        this.dingtalkSecret = serverSettings.dingtalkSecret
+        this.dingtalkKeyword = serverSettings.dingtalkKeyword
+        this.dingtalkNotification = serverSettings.dingtalkNotification
         this.listenHost = serverSettings.listenHost
         this.listenPort = serverSettings.listenPort
         this.publicUrl = serverSettings.publicUrl
