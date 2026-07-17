@@ -1038,4 +1038,83 @@ describe('SDKToLogConverter', () => {
             expect((logMessage as any).mode).toBe('plan')
         })
     })
+
+    describe('buildUsageCarrier (修复A: usage 载体)', () => {
+        it('构造空 content + 真实 usage 的 assistant 载体', () => {
+            const carrier = converter.buildUsageCarrier({
+                input_tokens: 100,
+                output_tokens: 200,
+                cache_read_input_tokens: 50,
+                cache_creation_input_tokens: 30
+            }) as any
+
+            expect(carrier.type).toBe('assistant')
+            expect(carrier.isSidechain).toBe(false)
+            expect(carrier.message.role).toBe('assistant')
+            // content 必须是显式空数组（[]），绝不能是 "" 或省略——否则前端会渲染成气泡
+            expect(carrier.message.content).toEqual([])
+            expect(carrier.message.usage).toMatchObject({
+                input_tokens: 100,
+                output_tokens: 200,
+                cache_read_input_tokens: 50,
+                cache_creation_input_tokens: 30
+            })
+            expect(carrier.uuid).toBeTruthy()
+            expect(carrier.timestamp).toBeTruthy()
+        })
+
+        it('parentUuid 接当前 lastUuid（本轮最后一条 assistant）', () => {
+            const assistant = converter.convert({
+                type: 'assistant',
+                message: { role: 'assistant', content: [{ type: 'text', text: 'hi' }] }
+            } as any)
+
+            const carrier = converter.buildUsageCarrier({ input_tokens: 1, output_tokens: 2 }) as any
+
+            expect(carrier.parentUuid).toBe(assistant!.uuid)
+        })
+
+        it('不更新 lastUuid —— 后续真实消息仍指本轮最后一条 assistant，不指载体（保持 parent chain 干净）', () => {
+            const assistant = converter.convert({
+                type: 'assistant',
+                message: { role: 'assistant', content: [{ type: 'text', text: 'hi' }] }
+            } as any)
+
+            converter.buildUsageCarrier({ input_tokens: 1, output_tokens: 2 }) // 载体（隐藏，不入 parent chain）
+
+            const next = converter.convert({
+                type: 'user',
+                message: { role: 'user', content: 'next turn' }
+            } as any) as any
+
+            // next 的 parent 必须是 assistant（本轮最后真实消息），不是载体的 uuid
+            expect(next.parentUuid).toBe(assistant!.uuid)
+        })
+
+        it('缓存有 contextWindow 时载体 usage 带 context_window', () => {
+            converter.convert({ type: 'system', subtype: 'init', session_id: 's', model: 'claude-opus-4-8' } as any)
+            converter.convert({
+                type: 'result', subtype: 'success', num_turns: 1, total_cost_usd: 0,
+                duration_ms: 1, duration_api_ms: 1, is_error: false, session_id: 's',
+                modelUsage: { 'claude-opus-4-8': { contextWindow: 500_000 } }
+            } as any)
+
+            const carrier = converter.buildUsageCarrier({ input_tokens: 1, output_tokens: 2 }) as any
+
+            expect(carrier.message.usage.context_window).toBe(500_000)
+        })
+
+        it('缓存空（无 init/result）时载体 usage 不带 context_window', () => {
+            const carrier = converter.buildUsageCarrier({ input_tokens: 1, output_tokens: 2 }) as any
+
+            expect(carrier.message.usage.context_window).toBeUndefined()
+        })
+
+        it('input/output 缺失时回落 0（参数全 optional）', () => {
+            const carrier = converter.buildUsageCarrier({}) as any
+
+            expect(carrier.message.usage.input_tokens).toBe(0)
+            expect(carrier.message.usage.output_tokens).toBe(0)
+        })
+    })
 })

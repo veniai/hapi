@@ -166,6 +166,36 @@ describe('reduceChatBlocks', () => {
         })
     })
 
+    it('uses usage from an empty-content agent carrier (修复A: 驱动 ctx 但不渲染成气泡)', () => {
+        const messages: NormalizedMessage[] = [
+            userMessage('u1', 'hi', 1),
+            {
+                id: 'carrier',
+                localId: null,
+                createdAt: 2,
+                role: 'agent',
+                content: [],
+                isSidechain: false,
+                usage: {
+                    input_tokens: 18037,
+                    output_tokens: 4,
+                    cache_read_input_tokens: 8320,
+                    context_window: 1_000_000
+                }
+            } as any
+        ]
+
+        const reduced = reduceChatBlocks(messages, null)
+
+        // latestUsage 取自载体（空 content 也带 usage → 驱动 ctx 读数）
+        expect(reduced.latestUsage).toMatchObject({
+            inputTokens: 18037,
+            outputTokens: 4
+        })
+        // 载体不渲染成 block（空 content 经 reduce 产 0 block）
+        expect(reduced.blocks).not.toContainEqual(expect.objectContaining({ id: 'carrier' }))
+    })
+
     it('keeps active goals visible across later normal user messages', () => {
         const reduced = reduceChatBlocks([
             goalMessage('goal-active', 'active', 1),

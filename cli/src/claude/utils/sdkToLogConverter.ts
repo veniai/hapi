@@ -415,6 +415,65 @@ export class SDKToLogConverter {
     }
 
     /**
+     * 由 result.usage 构造一条「usage 载体」assistant 消息：空 content + 真实 usage
+     * （+ context_window）。修复A：GLM 等 Anthropic-compatible 供应商的真实 token 只
+     * 在 result 里、流式 assistant 的 usage 是 {0,0} 占位，故追加这条载体走现有落库
+     * 链路，被 web reducer 反向扫描命中以驱动 ctx 读数；空 content 经 normalizeAgent
+     * 产 0 个 block、不渲染成气泡。
+     *
+     * 载体须为本轮最后一条带 usage 的消息（靠 launcher 队列顺序保证）。**不更新
+     * lastUuid**——载体隐藏不渲染，后续真实消息应仍指向本轮最后一条真实 assistant，
+     * 保持 parent chain 干净。
+     */
+    buildUsageCarrier(usage: {
+        input_tokens?: number
+        output_tokens?: number
+        cache_read_input_tokens?: number
+        cache_creation_input_tokens?: number
+    }): RawJSONLines {
+        const uuid = randomUUID()
+        const timestamp = new Date().toISOString()
+        const contextWindow = this.resolvedContextWindowKey
+            ? this.modelContextWindows.get(this.resolvedContextWindowKey)
+            : undefined
+        const carrierUsage: Record<string, number> = {
+            input_tokens: usage.input_tokens ?? 0,
+            output_tokens: usage.output_tokens ?? 0
+        }
+        if (usage.cache_read_input_tokens !== undefined) {
+            carrierUsage.cache_read_input_tokens = usage.cache_read_input_tokens
+        }
+        if (usage.cache_creation_input_tokens !== undefined) {
+            carrierUsage.cache_creation_input_tokens = usage.cache_creation_input_tokens
+        }
+        if (contextWindow !== undefined) {
+            carrierUsage.context_window = contextWindow
+        }
+        // context_window 不在 RawMessageSchema.usage（UsageSchema）里，靠 passthrough
+        // 透传；故整体先 unknown 再断言为 RawJSONLines。
+        const carrier = {
+            parentUuid: this.lastUuid,
+            isSidechain: false,
+            userType: 'external' as const,
+            cwd: this.context.cwd,
+            sessionId: this.context.sessionId,
+            version: this.context.version,
+            gitBranch: this.context.gitBranch,
+            uuid,
+            timestamp,
+            type: 'assistant',
+            message: {
+                role: 'assistant',
+                model: this.resolvedModel ?? undefined,
+                content: [],
+                usage: carrierUsage
+            }
+        } as unknown as RawJSONLines
+        // 不更新 this.lastUuid（见上方注释）
+        return carrier
+    }
+
+    /**
      * Convert multiple SDK messages to log format
      */
     convertMany(sdkMessages: SDKMessage[]): RawJSONLines[] {

@@ -252,6 +252,16 @@ class ClaudeRemoteLauncher extends RemoteLauncherBase {
                 messageQueue.enqueue(logMessage);
             }
 
+            // 修复A：result 到达时追加一条 usage 载体（空 content + 真实 usage），让 web
+            // 端 ctx 读数非 0。必须在 if(logMessage) 块外——convert(result) 返回 null、块
+            // 内不触发；convert(result) 已先把 modelUsage 的真实 contextWindow 刷新进缓存，
+            // buildUsageCarrier 此处能读到。subtype 非 success 或无 usage 不发。
+            if (message.type === 'result') {
+                if (message.subtype === 'success' && message.usage) {
+                    messageQueue.enqueue(sdkToLogConverter.buildUsageCarrier(message.usage))
+                }
+            }
+
             if (message.type === 'assistant') {
                 let umessage = message as SDKAssistantMessage;
                 if (umessage.message.content && Array.isArray(umessage.message.content)) {
