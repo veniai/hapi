@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest'
-import { getSessionLastSeenAt, markSessionSeen, SESSION_LAST_SEEN_EVENT } from './sessionLastSeen'
+import { getSessionLastSeenAt, getSessionLastSeenStore, markSessionSeen, SESSION_LAST_SEEN_EVENT } from './sessionLastSeen'
 
 describe('sessionLastSeen', () => {
     beforeEach(() => {
@@ -16,6 +16,17 @@ describe('sessionLastSeen', () => {
         markSessionSeen('session-a', 5000)
         markSessionSeen('session-a', 2000)
         expect(getSessionLastSeenAt('session-a')).toBe(5000)
+    })
+
+    it('returns one snapshot for list-level last-seen lookups without mutating old snapshots', () => {
+        markSessionSeen('session-a', 1000)
+        markSessionSeen('session-b', 2000)
+        const snapshot = getSessionLastSeenStore()
+
+        expect(snapshot).toEqual({ 'session-a': 1000, 'session-b': 2000 })
+        markSessionSeen('session-a', 3000)
+        expect(snapshot).toEqual({ 'session-a': 1000, 'session-b': 2000 })
+        expect(getSessionLastSeenStore()).toEqual({ 'session-a': 3000, 'session-b': 2000 })
     })
 
     it('ignores localStorage write failures', () => {
