@@ -210,7 +210,8 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         notificationChannels.push(new DingtalkChannel(
             config.dingtalkWebhook,
             config.dingtalkSecret ?? undefined,
-            config.dingtalkKeyword ?? undefined
+            config.dingtalkKeyword ?? undefined,
+            config.publicUrl
         ))
     }
 

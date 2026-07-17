@@ -37,13 +37,14 @@ describe('DingtalkChannel', () => {
         globalThis.fetch = originalFetch
     })
 
-    function makeChannel(opts: { secret?: string; keyword?: string } = {}): DingtalkChannel {
+    function makeChannel(opts: { secret?: string; keyword?: string; publicUrl?: string } = {}): DingtalkChannel {
         fetchMock.mockResolvedValue({ ok: true, status: 200, text: async () => '' })
         globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch
         return new DingtalkChannel(
             'https://oapi.dingtalk.com/robot/send?access_token=x',
             opts.secret,
-            opts.keyword
+            opts.keyword,
+            opts.publicUrl
         )
     }
 
@@ -52,21 +53,21 @@ describe('DingtalkChannel', () => {
         return { url: url as string, body: JSON.parse(init.body) }
     }
 
-    it('sendReady 文案「项目名·空闲」+ POST text payload', async () => {
+    it('sendReady 文案「项目名·空闲」+ POST markdown payload', async () => {
         const ch = makeChannel()
         await ch.sendReady(makeSession())
         expect(fetchMock).toHaveBeenCalledTimes(1)
         const { body } = lastCall()
-        expect(body.msgtype).toBe('text')
-        expect(body.text.content).toBe('my-project·空闲')
+        expect(body.msgtype).toBe('markdown')
+        expect(body.markdown.text).toBe('my-project·空闲')
     })
 
     it('sendTaskNotification failed → 「项目名·失败 summary」', async () => {
         const ch = makeChannel()
         await ch.sendTaskNotification(makeSession(), { summary: 'agent crashed', status: 'failed' })
         const { body } = lastCall()
-        expect(body.text.content).toContain('my-project·失败')
-        expect(body.text.content).toContain('agent crashed')
+        expect(body.markdown.text).toContain('my-project·失败')
+        expect(body.markdown.text).toContain('agent crashed')
     })
 
     it('sendPermissionRequest 带审批 tool 名', async () => {
@@ -75,7 +76,7 @@ describe('DingtalkChannel', () => {
             agentState: { requests: { r1: { tool: 'Bash', arguments: {}, createdAt: 0 } } } as any
         }))
         const { body } = lastCall()
-        expect(body.text.content).toBe('my-project·待审批 Bash')
+        expect(body.markdown.text).toBe('my-project·待审批 Bash')
     })
 
     it('secret 加签 → URL 含 timestamp & sign 查询参数', async () => {
@@ -90,7 +91,7 @@ describe('DingtalkChannel', () => {
         const ch = makeChannel({ keyword: '~' })
         await ch.sendReady(makeSession())
         const { body } = lastCall()
-        expect(body.text.content).toBe('my-project·空闲 ~')
+        expect(body.markdown.text).toBe('my-project·空闲 ~')
     })
 
     it('非 active session 不发（ready/task/permission）', async () => {
@@ -99,5 +100,14 @@ describe('DingtalkChannel', () => {
         await ch.sendTaskNotification(makeSession({ active: false }), { summary: 'x', status: 'failed' })
         await ch.sendPermissionRequest(makeSession({ active: false }))
         expect(fetchMock).not.toHaveBeenCalled()
+    })
+
+    it('publicUrl + sessionId → markdown 含「打开会话」链接（L3.3 deep link）', async () => {
+        const ch = makeChannel({ publicUrl: 'https://hapi.example.com/' })
+        await ch.sendReady(makeSession({ id: 's1' }))
+        const { body } = lastCall()
+        expect(body.msgtype).toBe('markdown')
+        expect(body.markdown.text).toContain('my-project·空闲')
+        expect(body.markdown.text).toMatch(/\[打开会话\]\(https:\/\/hapi\.example\.com\/sessions\/s1\)/)
     })
 })
