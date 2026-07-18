@@ -1057,7 +1057,8 @@ describe('SDKToLogConverter', () => {
                 input_tokens: 100,
                 output_tokens: 200,
                 cache_read_input_tokens: 50,
-                cache_creation_input_tokens: 30
+                cache_creation_input_tokens: 30,
+                context_tokens: 180
             })
             expect(carrier.uuid).toBeTruthy()
             expect(carrier.timestamp).toBeTruthy()
@@ -1115,6 +1116,21 @@ describe('SDKToLogConverter', () => {
 
             expect(carrier.message.usage.input_tokens).toBe(0)
             expect(carrier.message.usage.output_tokens).toBe(0)
+        })
+
+        it('GLM 多工具轮按 num_turns 还原单次请求上下文，避免累计 cache 重复计入 CTX', () => {
+            const carrier = converter.buildUsageCarrier({
+                input_tokens: 41_402,
+                output_tokens: 101,
+                cache_read_input_tokens: 18_304
+            }, 3) as any
+
+            expect(carrier.message.usage).toMatchObject({
+                input_tokens: 13_801,
+                output_tokens: 34,
+                cache_read_input_tokens: 6_101,
+                context_tokens: 19_902
+            })
         })
     })
 })

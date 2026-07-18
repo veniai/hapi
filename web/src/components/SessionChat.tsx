@@ -471,10 +471,6 @@ type SessionChatProps = {
     onClearSendError?: () => void
     initialOutlineOpen?: boolean
     onInitialOutlineConsumed?: () => void
-    // L3.1 第一条未读定位
-    lastSeenAt?: number
-    onLocateSettled?: () => void
-    locateResetToken?: number
 }
 
 /**
@@ -511,10 +507,9 @@ function SessionChatInner(props: SessionChatProps) {
     const normalizedCacheRef = useRef<Map<string, { source: DecryptedMessage; normalized: NormalizedMessage | null }>>(new Map())
     const blocksByIdRef = useRef<Map<string, ChatBlock>>(new Map())
     const visibleGroupsRef = useRef<ToolGroupBlock[]>([])
-    // L3.1: first-unread target id. Updated during render so HappyThread's
-    // load-until-found loop always reads the latest value from the ref.
-    const firstUnreadTargetIdRef = useRef<string | null>(null)
+    const latestUserMessageIdRef = useRef<string | null>(null)
     const [forceScrollToken, setForceScrollToken] = useState(0)
+    const [sendScrollPreviousMessageId, setSendScrollPreviousMessageId] = useState<string | null>(null)
     const [outlineOpen, setOutlineOpen] = useState(props.initialOutlineOpen ?? false)
     useEffect(() => {
         if (!props.initialOutlineOpen) {
@@ -1016,18 +1011,11 @@ function SessionChatInner(props: SessionChatProps) {
         visibleGroupsRef.current = visibleBlocks.filter(isToolGroupBlock)
     }, [visibleBlocks])
 
-    // L3.1: scan visibleBlocks (sidechains already folded into tool-call children,
-    // naturally skipped) for the first block with createdAt > lastSeenAt.
-    // Updated during render so HappyThread's load loop reads fresh on each iteration.
-    const lastSeenAtValue = props.lastSeenAt ?? 0
-    if (lastSeenAtValue > 0) {
-        const first = visibleBlocks.find((b) => b.createdAt > lastSeenAtValue)
-        firstUnreadTargetIdRef.current = first ? `${first.kind}:${first.id}` : null
-    } else {
-        firstUnreadTargetIdRef.current = null
-    }
-
-    const findFirstUnreadTargetId = useCallback(() => firstUnreadTargetIdRef.current, [])
+    const latestUserMessage = [...visibleBlocks].reverse().find((block) => block.kind === 'user-text')
+    latestUserMessageIdRef.current = latestUserMessage
+        ? `${latestUserMessage.kind}:${latestUserMessage.id}`
+        : null
+    const findLatestUserMessageId = useCallback(() => latestUserMessageIdRef.current, [])
 
     const outlineItems = useMemo(
         () => buildConversationOutline(reconciled.blocks),
@@ -1261,6 +1249,7 @@ function SessionChatInner(props: SessionChatProps) {
         // upstream review on PR #798: [Major] "Clear accepted scheduled
         // chat sends after scratchlist fallback".)
         const routedToScratchlist = shouldRouteToScratchlist(scratchlistMode, attachments, scheduledAt)
+        const previousUserMessageId = latestUserMessageIdRef.current
         const accepted = await onSendForComposer(text, attachments, scheduledAt)
         if (!accepted) return
         if (!routedToScratchlist) {
@@ -1272,6 +1261,7 @@ function SessionChatInner(props: SessionChatProps) {
             // matter for chat sends; scratchlist adds don't have a
             // schedule and shouldn't move the chat viewport.
             setPendingSchedule(null)
+            setSendScrollPreviousMessageId(previousUserMessageId)
             setForceScrollToken((token) => token + 1)
         }
     }, [onSendForComposer, scratchlistMode])
@@ -1365,10 +1355,8 @@ function SessionChatInner(props: SessionChatProps) {
                         outlineTitle={outlineTitle}
                         outlineItems={outlineItems}
                         onOutlineOpenChange={setOutlineOpen}
-                        findFirstUnreadTargetId={findFirstUnreadTargetId}
-                        onLocateSettled={props.onLocateSettled}
-                        lastSeenAt={props.lastSeenAt}
-                        locateResetToken={props.locateResetToken}
+                        findLatestUserMessageId={findLatestUserMessageId}
+                        sendScrollPreviousMessageId={sendScrollPreviousMessageId}
                     />
 
                     {codexCollaborationModeSupported && codexModelsState.error ? (

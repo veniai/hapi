@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
     Navigate,
@@ -42,8 +42,7 @@ import { useTranslation } from '@/lib/use-translation'
 import { fetchLatestMessages, gcMessageWindows, seedMessageWindowFromSession } from '@/lib/message-window-store'
 import { clearDraftsAfterSend } from '@/lib/clearDraftsAfterSend'
 import { inactiveSessionCanResume } from '@/lib/sessionResume'
-import { getSessionLastSeenAt, markSessionSeen } from '@/lib/sessionLastSeen'
-import { useSessionLastSeenVersion } from '@/hooks/useSessionLastSeen'
+import { markSessionSeen } from '@/lib/sessionLastSeen'
 import { useSessionBrowserTitle } from '@/hooks/useSessionBrowserTitle'
 import { clearCodexImportedSession, markCodexSessionsImported } from '@/lib/codexImportedSessions'
 import type { Machine, CodexDuplicateSessionGroup, CodexLocalSessionSummary } from '@/types/api'
@@ -62,21 +61,6 @@ import SettingsAboutPage from '@/routes/settings/about'
 import SharePage from '@/routes/share'
 import { setSharePendingTransfer } from '@/lib/sharePendingState'
 import { deleteShareTransfer } from '@/lib/shareTransfer'
-
-// L3.1: context bridge between SessionsPage (owns markSessionSeen gate +
-// locateSettledFor state) and SessionPage (renders <SessionChat>) — they are
-// separate route components joined by <Outlet />, so we thread the locate
-// callbacks + lastSeenAt through context.
-type SessionLocateContextValue = {
-    lastSeenAt: number
-    onLocateSettled: () => void
-    locateResetToken: number
-}
-const SessionLocateContext = createContext<SessionLocateContextValue>({
-    lastSeenAt: 0,
-    onLocateSettled: () => {},
-    locateResetToken: 0
-})
 
 function BackIcon(props: { className?: string }) {
     return (
@@ -236,52 +220,15 @@ function SessionsPage() {
         [selectedSessionId, sessions]
     )
     const isTabVisible = useTabVisible()
-    // L3.1: locateSettledFor gates markSessionSeen — the water level doesn't
-    // advance until HappyThread finishes locating the first unread message,
-    // so "first unread" doesn't disappear on entry. Reset to null on session
-    // change or tab-visible recovery to re-permit locating.
-    const [locateSettledFor, setLocateSettledFor] = useState<string | null>(null)
-    const [locateResetToken, setLocateResetToken] = useState(0)
-    const lastSeenVersion = useSessionLastSeenVersion()
-    const lastSeenAt = useMemo(
-        () => selectedSessionId ? getSessionLastSeenAt(selectedSessionId) : 0,
-        [selectedSessionId, lastSeenVersion]
-    )
-    useEffect(() => {
-        setLocateSettledFor(null)
-    }, [selectedSessionId])
-    useEffect(() => {
-        if (isTabVisible) {
-            setLocateSettledFor(null)
-            setLocateResetToken((t) => t + 1)
-        }
-    }, [isTabVisible])
-    const handleLocateSettled = useCallback(() => {
-        setLocateSettledFor((prev) => prev ?? selectedSessionId)
-    }, [selectedSessionId])
-    const locateContextValue = useMemo<SessionLocateContextValue>(() => ({
-        lastSeenAt,
-        onLocateSettled: handleLocateSettled,
-        locateResetToken
-    }), [lastSeenAt, handleLocateSettled, locateResetToken])
     useEffect(() => {
         if (!selectedSessionId || !selectedSession) {
             return
         }
-        // L0.2：tab 隐藏（锁屏/切走但 PWA 活着）期间冻结水位，避免 SSE 推高的
-        // updatedAt 把 lastSeenAt 推到最新——保证 AFK 返回时"第一条未读"仍在
-        // （L3.1 定位 / L1.2 时间红共用此水位）。定位完成前的进一步门控见 L3.1。
         if (!isTabVisible) {
             return
         }
-        // L3.1：定位完成前不推进水位（locateSettledFor === selectedSessionId 表示
-        // onLocateSettled 已回调）。两触发源（导航进入、hidden→visible）都先重置
-        // locateSettledFor=null，HappyThread 定位后才推进。
-        if (locateSettledFor !== selectedSessionId) {
-            return
-        }
         markSessionSeen(selectedSessionId, selectedSession.updatedAt)
-    }, [selectedSessionId, selectedSession?.updatedAt, isTabVisible, locateSettledFor])
+    }, [selectedSessionId, selectedSession?.updatedAt, isTabVisible])
     const currentCodexSessionId = selectedSession?.metadata?.flavor === 'codex'
         ? (selectedSession.metadata.agentSessionId ?? null)
         : null
@@ -625,9 +572,7 @@ function SessionsPage() {
 
             <div className={`${isSessionsIndex ? 'hidden lg:flex' : 'flex'} min-w-0 flex-1 flex-col bg-[var(--app-bg)]`}>
                 <div className="flex-1 min-h-0">
-                    <SessionLocateContext.Provider value={locateContextValue}>
-                        <Outlet />
-                    </SessionLocateContext.Provider>
+                    <Outlet />
                 </div>
             </div>
             </div>
@@ -694,7 +639,6 @@ function SessionPage() {
     const { addToast } = useToast()
     const { sessionId } = useParams({ from: '/sessions/$sessionId' })
     const { outline } = useSearch({ from: '/sessions/$sessionId' })
-    const { lastSeenAt, onLocateSettled, locateResetToken } = useContext(SessionLocateContext)
     const {
         session,
         error: sessionError,
@@ -1025,9 +969,6 @@ function SessionPage() {
             onClearSendError={clearSendError}
             initialOutlineOpen={outline}
             onInitialOutlineConsumed={handleInitialOutlineConsumed}
-            lastSeenAt={lastSeenAt}
-            onLocateSettled={onLocateSettled}
-            locateResetToken={locateResetToken}
         />
     )
 }

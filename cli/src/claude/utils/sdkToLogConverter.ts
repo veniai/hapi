@@ -430,27 +430,35 @@ export class SDKToLogConverter {
         output_tokens?: number
         cache_read_input_tokens?: number
         cache_creation_input_tokens?: number
-    }): RawJSONLines {
+    }, numTurns = 1): RawJSONLines {
         const uuid = randomUUID()
         const timestamp = new Date().toISOString()
         const contextWindow = this.resolvedContextWindowKey
             ? this.modelContextWindows.get(this.resolvedContextWindowKey)
             : undefined
+        // result.usage is cumulative across the model requests made by one
+        // Claude Code turn. GLM only reports useful usage here, so expose the
+        // per-request average instead of presenting the cumulative cache hits
+        // as one context window. Native Claude assistant events already carry
+        // per-request usage and do not rely on this carrier.
+        const divisor = Number.isInteger(numTurns) && numTurns > 0 ? numTurns : 1
+        const perRequest = (value: number | undefined): number => Math.round((value ?? 0) / divisor)
         const carrierUsage: Record<string, number> = {
-            input_tokens: usage.input_tokens ?? 0,
-            output_tokens: usage.output_tokens ?? 0
+            input_tokens: perRequest(usage.input_tokens),
+            output_tokens: perRequest(usage.output_tokens)
         }
         if (usage.cache_read_input_tokens !== undefined) {
-            carrierUsage.cache_read_input_tokens = usage.cache_read_input_tokens
+            carrierUsage.cache_read_input_tokens = perRequest(usage.cache_read_input_tokens)
         }
         if (usage.cache_creation_input_tokens !== undefined) {
-            carrierUsage.cache_creation_input_tokens = usage.cache_creation_input_tokens
+            carrierUsage.cache_creation_input_tokens = perRequest(usage.cache_creation_input_tokens)
         }
+        carrierUsage.context_tokens = carrierUsage.input_tokens
+            + (carrierUsage.cache_read_input_tokens ?? 0)
+            + (carrierUsage.cache_creation_input_tokens ?? 0)
         if (contextWindow !== undefined) {
             carrierUsage.context_window = contextWindow
         }
-        // context_window 不在 RawMessageSchema.usage（UsageSchema）里，靠 passthrough
-        // 透传；故整体先 unknown 再断言为 RawJSONLines。
         const carrier = {
             parentUuid: this.lastUuid,
             isSidechain: false,
