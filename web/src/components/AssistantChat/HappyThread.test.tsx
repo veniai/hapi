@@ -6,10 +6,10 @@ import {
     ConversationOutlinePanel,
     captureScrollAnchor,
     getScrollIntent,
-    locateFirstUnreadMessage,
     locateOutlineTargetMessage,
+    readChatScrollPosition,
     restoreScrollAnchor,
-    shouldCancelInitialScrollSettling,
+    writeChatScrollPosition,
 } from '@/components/AssistantChat/HappyThread'
 import type { ConversationOutlineItem } from '@/chat/outline'
 
@@ -138,36 +138,6 @@ describe('scroll anchor helpers', () => {
         })
     })
 
-    it('cancels initial scroll settling when the user scrolls up away from the bottom', () => {
-        const intent = getScrollIntent({
-            scrollTop: 520,
-            previousScrollTop: 700,
-            scrollHeight: 1232,
-            clientHeight: 530
-        })
-
-        expect(intent).toMatchObject({
-            distanceFromBottom: 182,
-            isScrollingUp: true
-        })
-        expect(shouldCancelInitialScrollSettling(intent)).toBe(true)
-    })
-
-    it('keeps initial scroll settling for negligible movement at the bottom', () => {
-        const intent = getScrollIntent({
-            scrollTop: 702,
-            previousScrollTop: 702,
-            scrollHeight: 1232,
-            clientHeight: 530
-        })
-
-        expect(intent).toMatchObject({
-            distanceFromBottom: 0,
-            isScrollingUp: false
-        })
-        expect(shouldCancelInitialScrollSettling(intent)).toBe(false)
-    })
-
     it('restores the captured message to the same viewport offset', () => {
         const viewport = document.createElement('div')
         const message = document.createElement('div')
@@ -229,83 +199,12 @@ describe('outline target loading', () => {
     })
 })
 
-describe('first unread target loading (predicate load-until-found)', () => {
-    it('paginates until the predicate returns a target id, then resolves the element', async () => {
-        // Set up DOM anchor matching getConversationMessageAnchorId('user-text:target')
-        const targetEl = document.createElement('div')
-        targetEl.id = 'hapi-message-user-text:target'
-        document.body.append(targetEl)
+describe('chat scroll persistence', () => {
+    it('stores a non-negative integer position per session', () => {
+        writeChatScrollPosition('session-a', 123.6)
+        writeChatScrollPosition('session-b', -20)
 
-        // Predicate: returns null for the first 2 calls (initial + after 1st load),
-        // returns the id after the 2nd load completes.
-        let predicateCalls = 0
-        let loadCount = 0
-        const findFirstUnreadTargetId = vi.fn((): string | null => {
-            predicateCalls += 1
-            return predicateCalls >= 3 ? 'user-text:target' : null
-        })
-        const loadOlderPreservingScroll = vi.fn(async () => {
-            loadCount += 1
-            return true
-        })
-
-        const target = await locateFirstUnreadMessage({
-            findFirstUnreadTargetId,
-            hasMoreMessages: () => true,
-            loadOlderPreservingScroll
-        })
-
-        // Call 1 (initial, returns null) → loop → load 1 → call 2 (null) → loop → load 2 → call 3 (hit)
-        expect(target).toBe(targetEl)
-        expect(loadOlderPreservingScroll).toHaveBeenCalledTimes(2)
-        expect(findFirstUnreadTargetId).toHaveBeenCalledTimes(3)
-
-        targetEl.remove()
-    })
-
-    it('returns null and does not paginate when hasMoreMessages is false from the start', async () => {
-        const loadOlderPreservingScroll = vi.fn(async () => true)
-        const findFirstUnreadTargetId = vi.fn(() => null)
-
-        const target = await locateFirstUnreadMessage({
-            findFirstUnreadTargetId,
-            hasMoreMessages: () => false,
-            loadOlderPreservingScroll
-        })
-
-        expect(target).toBeNull()
-        expect(loadOlderPreservingScroll).not.toHaveBeenCalled()
-        // Predicate called exactly once (initial scan)
-        expect(findFirstUnreadTargetId).toHaveBeenCalledTimes(1)
-    })
-
-    it('stops paginating when hasMoreMessages turns false mid-scan', async () => {
-        let loadCount = 0
-        const loadOlderPreservingScroll = vi.fn(async () => {
-            loadCount += 1
-            return true
-        })
-
-        const target = await locateFirstUnreadMessage({
-            findFirstUnreadTargetId: () => null,
-            hasMoreMessages: () => loadCount < 3,
-            loadOlderPreservingScroll
-        })
-
-        expect(target).toBeNull()
-        expect(loadOlderPreservingScroll).toHaveBeenCalledTimes(3)
-    })
-
-    it('stops when loadOlderPreservingScroll returns false', async () => {
-        const loadOlderPreservingScroll = vi.fn(async () => false)
-
-        const target = await locateFirstUnreadMessage({
-            findFirstUnreadTargetId: () => null,
-            hasMoreMessages: () => true,
-            loadOlderPreservingScroll
-        })
-
-        expect(target).toBeNull()
-        expect(loadOlderPreservingScroll).toHaveBeenCalledTimes(1)
+        expect(readChatScrollPosition('session-a')).toBe(124)
+        expect(readChatScrollPosition('session-b')).toBe(0)
     })
 })

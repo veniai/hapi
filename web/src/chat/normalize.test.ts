@@ -364,6 +364,41 @@ describe('normalizeDecryptedMessage', () => {
         })
     })
 
+    it('preserves explicit Claude context_tokens from a hidden usage carrier', () => {
+        const message = makeMessage({
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'assistant',
+                    uuid: 'usage-carrier',
+                    message: {
+                        role: 'assistant',
+                        content: [],
+                        usage: {
+                            input_tokens: 13_801,
+                            output_tokens: 34,
+                            cache_read_input_tokens: 6_101,
+                            context_tokens: 19_902,
+                            context_window: 1_000_000
+                        }
+                    }
+                }
+            }
+        })
+
+        expect(normalizeDecryptedMessage(message)).toMatchObject({
+            role: 'agent',
+            content: [],
+            usage: {
+                input_tokens: 13_801,
+                cache_read_input_tokens: 6_101,
+                context_tokens: 19_902,
+                context_window: 1_000_000
+            }
+        })
+    })
+
     it('normalizes non-sidechain text-only array-content user output as user message', () => {
         const message = makeMessage({
             role: 'agent',

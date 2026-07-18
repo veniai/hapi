@@ -28,10 +28,8 @@ type PendingScrollRestore = {
 const MESSAGE_ANCHOR_SELECTOR = '.happy-thread-messages > [id]'
 const AUTO_SCROLL_RESUME_THRESHOLD_PX = 120
 const MANUAL_SCROLL_EPSILON_PX = 1
-const INITIAL_SCROLL_SETTLE_MS = 1800
-const INITIAL_SCROLL_SETTLE_DELAYS_MS = [0, 16, 50, 120, 250, 500, 900, 1400, 1800] as const
-// L1.1：发消息后多段补滚（覆盖用户消息经 hub/SSE 延迟渲染）
-const SEND_FOLLOWUP_SCROLL_DELAYS_MS = [200, 500] as const
+const CHAT_SCROLL_STORAGE_PREFIX = 'hapi.chat-scroll.v1.'
+const SEND_SCROLL_TIMEOUT_MS = 1500
 
 type ScrollIntent = {
     distanceFromBottom: number
@@ -62,8 +60,26 @@ export function getScrollIntent(params: {
     }
 }
 
-export function shouldCancelInitialScrollSettling(intent: ScrollIntent): boolean {
-    return intent.isScrollingUp && intent.distanceFromBottom > MANUAL_SCROLL_EPSILON_PX
+export function readChatScrollPosition(sessionId: string): number {
+    try {
+        const value = sessionStorage.getItem(`${CHAT_SCROLL_STORAGE_PREFIX}${sessionId}`)
+        if (value === null) return 0
+        const parsed = Number(value)
+        return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0
+    } catch {
+        return 0
+    }
+}
+
+export function writeChatScrollPosition(sessionId: string, scrollTop: number): void {
+    try {
+        sessionStorage.setItem(
+            `${CHAT_SCROLL_STORAGE_PREFIX}${sessionId}`,
+            String(Math.max(0, Math.round(scrollTop)))
+        )
+    } catch {
+        // Scroll persistence is best-effort (private mode / quota errors).
+    }
 }
 
 export function captureScrollAnchor(viewport: HTMLElement): ScrollAnchor | null {
@@ -103,29 +119,6 @@ export async function locateOutlineTargetMessage(options: LocateOutlineTargetOpt
         target = options.findTarget(anchorId)
     }
     return target
-}
-
-type LocateFirstUnreadOptions = {
-    findFirstUnreadTargetId: () => string | null
-    hasMoreMessages: () => boolean
-    loadOlderPreservingScroll: () => Promise<boolean>
-}
-
-/**
- * 定位「第一条未读」（L3.1）：与 locateOutlineTargetMessage 同样 load-until-found，
- * 但用谓词回调 findFirstUnreadTargetId 代替已知 id——每加载一页重扫 normalized/blocks，
- * 找第一条 createdAt > lastSeenAt。返回目标的 DOM 元素（scrollIntoView 用）。
- * ≤50 条未读直接命中当前窗口；>50 条靠 while 翻页直到命中或历史耗尽。
- */
-export async function locateFirstUnreadMessage(options: LocateFirstUnreadOptions): Promise<HTMLElement | null> {
-    let targetId = options.findFirstUnreadTargetId()
-    while (!targetId && options.hasMoreMessages()) {
-        const loaded = await options.loadOlderPreservingScroll()
-        if (!loaded) break
-        targetId = options.findFirstUnreadTargetId()
-    }
-    if (!targetId) return null
-    return document.getElementById(getConversationMessageAnchorId(targetId))
 }
 
 function NewMessagesIndicator(props: { count: number; onClick: () => void }) {
@@ -288,18 +281,13 @@ export function HappyThread(props: {
     outlineItems: readonly ConversationOutlineItem[]
     onOutlineOpenChange: (open: boolean) => void
     onOutlineItemClick?: (item: ConversationOutlineItem) => void
-    // L3.1 第一条未读定位
-    findFirstUnreadTargetId?: () => string | null
-    onLocateSettled?: () => void
-    lastSeenAt?: number
-    // bumped by router on hidden→visible recovery to re-trigger locate
-    locateResetToken?: number
+    findLatestUserMessageId: () => string | null
+    sendScrollPreviousMessageId: string | null
 }) {
     const { t } = useTranslation()
     const { terminalToolDisplayMode } = useTerminalToolDisplayMode()
     const viewportRef = useRef<HTMLDivElement | null>(null)
     const contentRef = useRef<HTMLDivElement | null>(null)
-    const topSentinelRef = useRef<HTMLDivElement | null>(null)
     const loadLockRef = useRef(false)
     const pendingScrollRef = useRef<PendingScrollRestore | null>(null)
     const prevLoadingMoreRef = useRef(false)
@@ -309,7 +297,6 @@ export function HappyThread(props: {
     const isLoadingMessagesRef = useRef(props.isLoadingMessages)
     const messagesVersionRef = useRef(props.messagesVersion)
     const onLoadMoreRef = useRef(props.onLoadMore)
-    const handleLoadMoreRef = useRef<() => void>(() => {})
     const pendingLoadPromiseRef = useRef<Promise<boolean> | null>(null)
     const pendingLoadResolveRef = useRef<((value: boolean) => void) | null>(null)
     const pendingLoadBaselineRef = useRef<{ messagesVersion: number; hasMoreMessages: boolean } | null>(null)
@@ -318,15 +305,9 @@ export function HappyThread(props: {
     const onFlushPendingRef = useRef(props.onFlushPending)
     const forceScrollTokenRef = useRef(props.forceScrollToken)
     const lastScrollTopRef = useRef(0)
-    const sessionIdRef = useRef(props.sessionId)
-    const initialScrollSessionRef = useRef<string | null>(null)
-    const initialScrollDeadlineRef = useRef(0)
-    const initialScrollTimersRef = useRef<number[]>([])
-    // L3.1 locate state
-    const locateAttemptedTokenRef = useRef(-1)
-    const locateTimerRef = useRef<number | null>(null)
-    const findFirstUnreadTargetIdRef = useRef(props.findFirstUnreadTargetId)
-    const onLocateSettledRef = useRef(props.onLocateSettled)
+    const pendingSavedScrollRef = useRef<number | null>(readChatScrollPosition(props.sessionId))
+    const pendingSendScrollRef = useRef<{ deadline: number; previousMessageId: string | null } | null>(null)
+    const findLatestUserMessageIdRef = useRef(props.findLatestUserMessageId)
 
     // Smart scroll state: enabled only while the user is intentionally at the bottom.
     const autoScrollEnabledRef = useRef(true)
@@ -349,26 +330,8 @@ export function HappyThread(props: {
         onLoadMoreRef.current = props.onLoadMore
     }, [props.onLoadMore])
     useEffect(() => {
-        findFirstUnreadTargetIdRef.current = props.findFirstUnreadTargetId
-    }, [props.findFirstUnreadTargetId])
-    useEffect(() => {
-        onLocateSettledRef.current = props.onLocateSettled
-    }, [props.onLocateSettled])
-
-    useEffect(() => {
-        sessionIdRef.current = props.sessionId
-    }, [props.sessionId])
-
-    const isInitialScrollSettling = useCallback(() => {
-        return initialScrollSessionRef.current === sessionIdRef.current && Date.now() < initialScrollDeadlineRef.current
-    }, [])
-
-    const clearInitialScrollTimers = useCallback(() => {
-        for (const timer of initialScrollTimersRef.current) {
-            window.clearTimeout(timer)
-        }
-        initialScrollTimersRef.current = []
-    }, [])
+        findLatestUserMessageIdRef.current = props.findLatestUserMessageId
+    }, [props.findLatestUserMessageId])
 
     const settlePendingLoad = useCallback((result: boolean) => {
         const resolve = pendingLoadResolveRef.current
@@ -437,16 +400,7 @@ export function HappyThread(props: {
                 previousScrollTop: lastScrollTopRef.current
             })
             lastScrollTopRef.current = viewport.scrollTop
-
-            if (isInitialScrollSettling()) {
-                if (shouldCancelInitialScrollSettling(intent)) {
-                    initialScrollDeadlineRef.current = 0
-                    clearInitialScrollTimers()
-                    setAutoScrollMode(false)
-                    setAtBottomMode(false)
-                }
-                return
-            }
+            writeChatScrollPosition(props.sessionId, viewport.scrollTop)
 
             if (intent.isScrollingUp && intent.distanceFromBottom > MANUAL_SCROLL_EPSILON_PX) {
                 setAutoScrollMode(false)
@@ -465,16 +419,11 @@ export function HappyThread(props: {
         }
 
         viewport.addEventListener('scroll', handleScroll, { passive: true })
-        return () => viewport.removeEventListener('scroll', handleScroll)
-    }, []) // Stable: no dependencies, reads from refs
-
-    const scrollToBottomInstant = useCallback(() => {
-        const viewport = viewportRef.current
-        if (viewport) {
-            viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'instant' })
-            lastScrollTopRef.current = viewport.scrollTop
+        return () => {
+            writeChatScrollPosition(props.sessionId, viewport.scrollTop)
+            viewport.removeEventListener('scroll', handleScroll)
         }
-    }, [])
+    }, [props.sessionId, setAtBottomMode, setAutoScrollMode])
 
     // Scroll to bottom handler for the indicator button
     const scrollToBottom = useCallback(() => {
@@ -491,98 +440,64 @@ export function HappyThread(props: {
         onFlushPendingRef.current()
     }, [])
 
-    // Reset state when session changes
-    useLayoutEffect(() => {
-        autoScrollEnabledRef.current = true
-        lastScrollTopRef.current = viewportRef.current?.scrollTop ?? 0
-        atBottomRef.current = true
-        onAtBottomChangeRef.current(true)
-        forceScrollTokenRef.current = props.forceScrollToken
-        pendingScrollRef.current = null
-        loadLockRef.current = false
-        loadStartedRef.current = false
-        initialScrollSessionRef.current = null
-        initialScrollDeadlineRef.current = 0
-        clearInitialScrollTimers()
-        settlePendingLoad(false)
-        if (locateTimerRef.current !== null) {
-            window.clearTimeout(locateTimerRef.current)
-            locateTimerRef.current = null
-        }
-        locateAttemptedTokenRef.current = -1
-    }, [props.sessionId, clearInitialScrollTimers, settlePendingLoad])
-
-    useLayoutEffect(() => {
-        if (
-            initialScrollSessionRef.current === props.sessionId
-            || props.isLoadingMessages
-            || props.rawMessagesCount === 0
-            || pendingScrollRef.current
-        ) {
-            return
-        }
-
-        initialScrollSessionRef.current = props.sessionId
-        autoScrollEnabledRef.current = true
-        atBottomRef.current = true
-        onAtBottomChangeRef.current(true)
-        scrollToBottomInstant()
-
-        initialScrollDeadlineRef.current = Date.now() + INITIAL_SCROLL_SETTLE_MS
-        clearInitialScrollTimers()
-        initialScrollTimersRef.current = INITIAL_SCROLL_SETTLE_DELAYS_MS.map((delay) => window.setTimeout(() => {
-            if (
-                initialScrollSessionRef.current !== props.sessionId
-                || !autoScrollEnabledRef.current
-                || pendingScrollRef.current
-            ) {
-                return
-            }
-            scrollToBottomInstant()
-        }, delay))
-    }, [
-        props.sessionId,
-        props.isLoadingMessages,
-        props.rawMessagesCount,
-        props.messagesVersion,
-        scrollToBottomInstant,
-        clearInitialScrollTimers
-    ])
-
     useEffect(() => {
         return () => {
-            clearInitialScrollTimers()
             settlePendingLoad(false)
-            if (locateTimerRef.current !== null) {
-                window.clearTimeout(locateTimerRef.current)
-                locateTimerRef.current = null
-            }
         }
-    }, [clearInitialScrollTimers, settlePendingLoad])
+    }, [settlePendingLoad])
+
+    const restoreSavedPosition = useCallback((): boolean => {
+        const viewport = viewportRef.current
+        const saved = pendingSavedScrollRef.current
+        if (!viewport || saved === null) return false
+
+        const maxScrollTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
+        viewport.scrollTop = Math.min(saved, maxScrollTop)
+        lastScrollTopRef.current = viewport.scrollTop
+        if (saved === 0 || maxScrollTop >= saved || (!hasMoreMessagesRef.current && !isLoadingMessagesRef.current)) {
+            pendingSavedScrollRef.current = null
+        }
+        return true
+    }, [])
+
+    const scrollToSentMessage = useCallback((): boolean => {
+        const pending = pendingSendScrollRef.current
+        const viewport = viewportRef.current
+        if (!pending || !viewport) return false
+        if (Date.now() > pending.deadline) {
+            pendingSendScrollRef.current = null
+            return false
+        }
+        const messageId = findLatestUserMessageIdRef.current()
+        if (!messageId || messageId === pending.previousMessageId) return false
+        const target = document.getElementById(getConversationMessageAnchorId(messageId))
+        if (!target || !viewport.contains(target)) return false
+
+        target.scrollIntoView({ block: 'start', behavior: 'smooth' })
+        lastScrollTopRef.current = viewport.scrollTop
+        pendingSavedScrollRef.current = null
+        pendingSendScrollRef.current = null
+        autoScrollEnabledRef.current = false
+        return true
+    }, [])
 
     useEffect(() => {
-        if (forceScrollTokenRef.current === props.forceScrollToken) {
-            return
-        }
+        if (forceScrollTokenRef.current === props.forceScrollToken) return
         forceScrollTokenRef.current = props.forceScrollToken
-        // L1.1：发消息滚到底——smooth scrollToBottom（重置跟随状态 + flush pending），
-        // 加真 setTimeout 多段补滚，覆盖用户消息经 hub/SSE 延迟渲染。
-        scrollToBottom()
-        const timers = SEND_FOLLOWUP_SCROLL_DELAYS_MS.map((delay) => window.setTimeout(() => {
-            scrollToBottom()
-        }, delay))
-        return () => {
-            for (const t of timers) clearTimeout(t)
+        pendingSendScrollRef.current = {
+            deadline: Date.now() + SEND_SCROLL_TIMEOUT_MS,
+            previousMessageId: props.sendScrollPreviousMessageId
         }
-    }, [props.forceScrollToken, scrollToBottom])
+        const timers = [0, 50, 200, 500, 1000].map((delay) => window.setTimeout(scrollToSentMessage, delay))
+        return () => timers.forEach((timer) => window.clearTimeout(timer))
+    }, [props.forceScrollToken, props.sendScrollPreviousMessageId, scrollToSentMessage])
 
     const loadOlderPreservingScroll = useCallback((): Promise<boolean> => {
         if (pendingLoadPromiseRef.current) {
             return pendingLoadPromiseRef.current
         }
         if (
-            isInitialScrollSettling()
-            || isLoadingMessagesRef.current
+            isLoadingMessagesRef.current
             || !hasMoreMessagesRef.current
             || isLoadingMoreRef.current
             || loadLockRef.current
@@ -631,7 +546,7 @@ export function HappyThread(props: {
             console.error('Failed to load older messages:', error)
         }
         return loadPromise
-    }, [isInitialScrollSettling, settlePendingLoad])
+    }, [settlePendingLoad])
 
     const handleOutlineSelect = useCallback(async (item: ConversationOutlineItem) => {
         const target = await locateOutlineTargetMessage({
@@ -649,112 +564,22 @@ export function HappyThread(props: {
     }, [loadOlderPreservingScroll, props.onOutlineItemClick, props.onOutlineOpenChange])
 
     useEffect(() => {
-        handleLoadMoreRef.current = () => {
-            void loadOlderPreservingScroll()
-        }
-    }, [loadOlderPreservingScroll])
-
-    // L3.1: locate first unread message after initial scroll settling.
-    // settling 期间 loadOlderPreservingScroll 会 return false（禁分页），故
-    // 必须等 INITIAL_SCROLL_SETTLE 结束才触发；用 load-until-found 翻页。
-    useEffect(() => {
-        const finder = findFirstUnreadTargetIdRef.current
-        if (!finder) return
-        if (props.isLoadingMessages || props.rawMessagesCount === 0) return
-        if (initialScrollSessionRef.current !== props.sessionId) return
-
-        const token = props.locateResetToken ?? 0
-        if (locateAttemptedTokenRef.current === token) return
-
-        // Token changed (or first run) — clear stale timer from previous token
-        if (locateTimerRef.current !== null) {
-            window.clearTimeout(locateTimerRef.current)
-            locateTimerRef.current = null
-        }
-        locateAttemptedTokenRef.current = token
-
-        const deadline = initialScrollDeadlineRef.current
-        const waitMs = deadline > 0 ? Math.max(0, deadline - Date.now()) + 50 : 50
-
-        locateTimerRef.current = window.setTimeout(() => {
-            locateTimerRef.current = null
-            if (sessionIdRef.current !== props.sessionId) return
-
-            void (async () => {
-                const target = await locateFirstUnreadMessage({
-                    findFirstUnreadTargetId: finder,
-                    hasMoreMessages: () => hasMoreMessagesRef.current,
-                    loadOlderPreservingScroll
-                })
-                if (sessionIdRef.current !== props.sessionId) return
-
-                if (target) {
-                    target.scrollIntoView({ block: 'start', behavior: 'smooth' })
-                    autoScrollEnabledRef.current = false
-                } else {
-                    scrollToBottom()
-                }
-                onLocateSettledRef.current?.()
-            })()
-        }, waitMs)
-    }, [
-        props.locateResetToken,
-        props.isLoadingMessages,
-        props.rawMessagesCount,
-        props.sessionId,
-        props.messagesVersion,
-        loadOlderPreservingScroll,
-        scrollToBottom
-    ])
-
-    useEffect(() => {
-        const sentinel = topSentinelRef.current
-        const viewport = viewportRef.current
-        if (!sentinel || !viewport || !props.hasMoreMessages || props.isLoadingMessages) {
-            return
-        }
-        if (typeof IntersectionObserver === 'undefined') {
-            return
-        }
-
-        const observer = new IntersectionObserver(
-            (entries) => {
-                for (const entry of entries) {
-                    if (entry.isIntersecting) {
-                        if (isInitialScrollSettling()) {
-                            continue
-                        }
-                        handleLoadMoreRef.current()
-                    }
-                }
-            },
-            {
-                root: viewport,
-                rootMargin: '200px 0px 0px 0px'
-            }
-        )
-
-        observer.observe(sentinel)
-        return () => observer.disconnect()
-    }, [props.hasMoreMessages, props.isLoadingMessages, isInitialScrollSettling])
-
-    useEffect(() => {
         const content = contentRef.current
         if (!content || typeof ResizeObserver === 'undefined') {
             return
         }
 
         const observer = new ResizeObserver(() => {
-            // L1.1：默认不动——内容增高时只重算并同步 atBottom/autoScroll，
-            // 不再主动 scrollToBottomInstant。用户停在当前阅读位置；atBottom 据实同步。
             if (pendingScrollRef.current) {
                 return
             }
+            if (restoreSavedPosition()) return
+            if (scrollToSentMessage()) return
             recomputeAtBottom()
         })
         observer.observe(content)
         return () => observer.disconnect()
-    }, [recomputeAtBottom])
+    }, [recomputeAtBottom, restoreSavedPosition, scrollToSentMessage])
 
     useLayoutEffect(() => {
         const pending = pendingScrollRef.current
@@ -774,9 +599,9 @@ export function HappyThread(props: {
             settlePendingLoad(true)
             return
         }
-        // L1.1：去掉「在底部就自动滚」分支——只保留加载历史保位（pending）。
-        // 自动跟随由用户主动行为（发消息 / 回到底部按钮）触发，流式期间不再拽到底。
-    }, [props.messagesVersion, settlePendingLoad])
+        if (restoreSavedPosition()) return
+        scrollToSentMessage()
+    }, [props.messagesVersion, restoreSavedPosition, scrollToSentMessage, settlePendingLoad])
 
     useEffect(() => {
         isLoadingMoreRef.current = props.isLoadingMoreMessages
@@ -818,7 +643,7 @@ export function HappyThread(props: {
                 >
                     <div ref={viewportRef} className="app-scroll-y min-h-0 flex-1 overflow-x-hidden">
                         <div ref={contentRef} className="mx-auto w-full max-w-content min-w-0 p-3">
-                            <div ref={topSentinelRef} className="h-px w-full" aria-hidden="true" />
+                            <div className="h-px w-full" aria-hidden="true" />
                             {showSkeleton ? (
                                 <MessageSkeleton />
                             ) : (

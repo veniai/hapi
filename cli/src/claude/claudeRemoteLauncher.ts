@@ -4,7 +4,7 @@ import { RemoteModeDisplay } from "@/ui/ink/RemoteModeDisplay";
 import { claudeRemote } from "./claudeRemote";
 import { PermissionHandler } from "./utils/permissionHandler";
 import { Future } from "@/utils/future";
-import { SDKAssistantMessage, SDKMessage, SDKUserMessage } from "./sdk";
+import { SDKAssistantMessage, SDKMessage, SDKResultMessage, SDKUserMessage } from "./sdk";
 import { formatClaudeMessageForInk } from "@/ui/messageFormatterInk";
 import { logger } from "@/ui/logger";
 import { SDKToLogConverter } from "./utils/sdkToLogConverter";
@@ -257,8 +257,9 @@ class ClaudeRemoteLauncher extends RemoteLauncherBase {
             // 内不触发；convert(result) 已先把 modelUsage 的真实 contextWindow 刷新进缓存，
             // buildUsageCarrier 此处能读到。subtype 非 success 或无 usage 不发。
             if (message.type === 'result') {
-                if (message.subtype === 'success' && message.usage) {
-                    messageQueue.enqueue(sdkToLogConverter.buildUsageCarrier(message.usage))
+                const resultMessage = message as SDKResultMessage
+                if (resultMessage.subtype === 'success' && resultMessage.usage) {
+                    messageQueue.enqueue(sdkToLogConverter.buildUsageCarrier(resultMessage.usage, resultMessage.num_turns))
                 }
             }
 
