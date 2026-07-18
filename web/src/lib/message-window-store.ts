@@ -932,6 +932,54 @@ export async function fetchLatestMessages(api: ApiClient, sessionId: string): Pr
     }
 }
 
+export async function fetchLocatedWindow(
+    api: ApiClient,
+    sessionId: string,
+    targetMessageId: string,
+    options?: { beforeLimit?: number; afterLimit?: number }
+): Promise<{ ok: true } | { ok: false; reason: 'not-found' }> {
+    const initial = getState(sessionId)
+    if (initial.isLoading) {
+        return { ok: false, reason: 'not-found' }
+    }
+    const generation = beginAsyncGeneration(sessionId, 'latest', { isLoading: true, warning: null })
+    try {
+        const window = await api.locateMessageWindow(sessionId, targetMessageId, options) as {
+            messages: typeof initial.messages
+            target: { at: number; seq: number } | null
+            olderCursor: { at: number; seq: number } | null
+            hasOlder: boolean
+            newerCursor: { at: number; seq: number } | null
+            hasNewer: boolean
+        }
+        if (!isCurrentGeneration(sessionId, 'latest', generation)) {
+            return { ok: true }
+        }
+        updateStateForGeneration(sessionId, 'latest', generation, (prev) => {
+            return buildState(prev, {
+                messages: window.messages,
+                pending: [],
+                pendingOverflowCount: 0,
+                pendingVisibleCount: 0,
+                pendingOverflowVisibleCount: 0,
+                hasMore: window.hasOlder,
+                oldestPositionAt: window.olderCursor?.at ?? null,
+                oldestPositionSeq: window.olderCursor?.seq ?? null,
+                isLoading: false,
+                hasLoadedLatest: !window.hasNewer,
+                atBottom: !window.hasNewer,
+                warning: null,
+            })
+        })
+        return { ok: true }
+    } catch {
+        updateStateForGeneration(sessionId, 'latest', generation, (prev) =>
+            buildState(prev, { isLoading: false, warning: 'Failed to locate' })
+        )
+        return { ok: false, reason: 'not-found' }
+    }
+}
+
 export async function fetchOlderMessages(api: ApiClient, sessionId: string): Promise<void> {
     const initial = getState(sessionId)
     if (initial.isLoadingMore || !initial.hasMore) {

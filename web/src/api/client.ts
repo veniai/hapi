@@ -83,6 +83,11 @@ export class ApiError extends Error {
 
 export class ApiClient {
     private token: string
+
+    /** Public accessor for keepalive fetch (useReadPositionReporter). */
+    getBearerToken(): string {
+        return this.token
+    }
     private readonly baseUrl: string | null
     private readonly getToken: (() => string | null) | null
     private readonly onUnauthorized: (() => Promise<string | null>) | null

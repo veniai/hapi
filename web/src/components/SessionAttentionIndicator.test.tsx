@@ -29,6 +29,8 @@ function makeSummary(overrides: Partial<SessionSummary> & { id: string }): Sessi
         nextScheduledAt: null,
         model: null,
         effort: null,
+        lastReadMessageId: null,
+        lastReadAt: null,
         ...overrides
     }
 }
