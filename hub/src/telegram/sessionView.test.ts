@@ -28,6 +28,8 @@ function createSession(overrides: Partial<Session> = {}): Session {
         modelReasoningEffort: null,
         effort: null,
         serviceTier: null,
+        lastReadMessageId: null,
+        lastReadAt: null,
         ...overrides
     }
 }

@@ -34,6 +34,8 @@ function createSession(overrides?: Partial<Session>): Session {
         serviceTier: null,
         permissionMode: 'default',
         collaborationMode: 'default'
+        lastReadMessageId: null,
+        lastReadAt: null,
     }
 
     return {

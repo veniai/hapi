@@ -10,8 +10,8 @@ export function classifySessionAttention(
     summary: SessionSummary,
     options: { selected: boolean; lastSeenAt: number }
 ): SessionAttention | null {
-    // 选中（已在视线内）或已归档（死会话）—— 永不浮出，即便残留 stale 请求。
-    if (options.selected || summary.metadata?.lifecycleState === 'archived') {
+    // 已归档（死会话）—— 永不浮出。selected 不再短路（归调用方 suppress）。
+    if (summary.metadata?.lifecycleState === 'archived') {
         return null
     }
 

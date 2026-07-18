@@ -245,6 +245,81 @@ export function getMessagesByPosition(
     return rows.reverse().map(toStoredMessage)
 }
 
+export type LocatedWindow = {
+    messages: StoredMessage[]
+    target: { at: number; seq: number } | null
+    olderCursor: { at: number; seq: number } | null
+    hasOlder: boolean
+    newerCursor: { at: number; seq: number } | null
+    hasNewer: boolean
+}
+
+/** Locate a window of messages around a target messageId (inclusive).
+ *  Returns null if target not found or doesn't belong to session. */
+export function locateMessageWindow(
+    db: Database,
+    sessionId: string,
+    targetMessageId: string,
+    options: { beforeLimit: number; afterLimit: number }
+): LocatedWindow | null {
+    const beforeLimit = Number.isFinite(options.beforeLimit) ? Math.max(1, Math.min(200, options.beforeLimit)) : 50
+    const afterLimit = Number.isFinite(options.afterLimit) ? Math.max(1, Math.min(200, options.afterLimit)) : 50
+    const targetRow = db.prepare('SELECT * FROM messages WHERE session_id = ? AND id = ?')
+        .get(sessionId, targetMessageId) as DbMessageRow | null
+    if (!targetRow) return null
+    const targetAt = targetRow.invoked_at ?? targetRow.created_at
+    const targetSeq = targetRow.seq
+    const olderRows = db.prepare(`
+        SELECT *, COALESCE(invoked_at, created_at) AS position_at FROM messages
+        WHERE session_id = ? AND (position_at < ? OR (position_at = ? AND seq < ?))
+        ORDER BY position_at DESC, seq DESC LIMIT ?
+    `).all(sessionId, targetAt, targetAt, targetSeq, beforeLimit + 1) as DbMessageRow[]
+    const newerRows = db.prepare(`
+        SELECT *, COALESCE(invoked_at, created_at) AS position_at FROM messages
+        WHERE session_id = ? AND (position_at > ? OR (position_at = ? AND seq > ?))
+        ORDER BY position_at ASC, seq ASC LIMIT ?
+    `).all(sessionId, targetAt, targetAt, targetSeq, afterLimit + 1) as DbMessageRow[]
+    const hasOlder = olderRows.length > beforeLimit
+    const hasNewer = newerRows.length > afterLimit
+    const older = olderRows.slice(0, beforeLimit).reverse()
+    const newer = newerRows.slice(0, afterLimit)
+    const messages = [...older, targetRow, ...newer].map(toStoredMessage)
+    const olderCursor = older.length > 0
+        ? { at: older[0].invoked_at ?? older[0].created_at, seq: older[0].seq }
+        : null
+    const newerCursor = newer.length > 0
+        ? { at: newer[newer.length - 1].invoked_at ?? newer[newer.length - 1].created_at, seq: newer[newer.length - 1].seq }
+        : null
+    return { messages, target: { at: targetAt, seq: targetSeq }, olderCursor, hasOlder, newerCursor, hasNewer }
+}
+
+/** Paginate messages NEWER-than-cursor (ascending). For fetchNewerMessages. */
+export function getMessagesByPositionAfter(
+    db: Database,
+    sessionId: string,
+    limit: number,
+    after?: { at: number; seq: number }
+): StoredMessage[] {
+    const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(200, limit)) : 200
+    const afterClause = after
+        ? 'AND (COALESCE(invoked_at, created_at) > @afterAt OR (COALESCE(invoked_at, created_at) = @afterAt AND seq > @afterSeq))'
+        : ''
+    const rows = db.prepare(`
+        SELECT *, COALESCE(invoked_at, created_at) AS position_at
+        FROM messages
+        WHERE session_id = @sessionId
+          ${afterClause}
+        ORDER BY position_at ASC, seq ASC
+        LIMIT @limit
+    `).all({
+        sessionId,
+        afterAt: after?.at ?? null,
+        afterSeq: after?.seq ?? null,
+        limit: safeLimit
+    }) as DbMessageRow[]
+    return rows.map(toStoredMessage)
+}
+
 /** Returns user messages that have a localId but no invoked_at.
  *  Includes future scheduled messages — used to surface all queued messages
  *  (including scheduled) for the Web floating bar on refresh / secondary clients. */

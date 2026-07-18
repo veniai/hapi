@@ -228,10 +228,43 @@ export const SessionSchema = z.object({
     effort: z.string().nullable().optional().default(null),
     serviceTier: z.string().nullable().optional().default(null),
     permissionMode: PermissionModeSchema.optional(),
-    collaborationMode: CodexCollaborationModeSchema.optional()
+    collaborationMode: CodexCollaborationModeSchema.optional(),
+    lastReadMessageId: z.string().nullable().default(null),
+    lastReadAt: z.number().nullable().default(null)
 })
 
 export type Session = z.infer<typeof SessionSchema>
+
+export const ReadPositionRequestSchema = z.object({
+    messageId: z.string(),
+    observedAt: z.number().int().nonnegative(),
+    expectedLastReadAt: z.number().int().nullable().optional()
+})
+export type ReadPositionRequest = z.infer<typeof ReadPositionRequestSchema>
+
+export const ReadPositionResponseSchema = z.object({
+    ok: z.boolean(),
+    updatedAt: z.number().optional(),
+    stale: z.boolean().optional(),
+    currentUpdatedAt: z.number().nullable().optional()
+})
+export type ReadPositionResponse = z.infer<typeof ReadPositionResponseSchema>
+
+export const MessageLocateQuerySchema = z.object({
+    messageId: z.string().uuid(),
+    beforeLimit: z.number().int().min(1).max(200).optional().default(50),
+    afterLimit: z.number().int().min(1).max(200).optional().default(50)
+})
+
+export const MessageLocateResponseSchema = z.object({
+    messages: z.array(z.unknown()),
+    target: z.object({ at: z.number(), seq: z.number() }).nullable(),
+    olderCursor: z.object({ at: z.number(), seq: z.number() }).nullable(),
+    hasOlder: z.boolean(),
+    newerCursor: z.object({ at: z.number(), seq: z.number() }).nullable(),
+    hasNewer: z.boolean()
+})
+export type MessageLocateResponse = z.infer<typeof MessageLocateResponseSchema>
 
 export const SessionPatchSchema = z.object({
     active: z.boolean().optional(),
@@ -383,6 +416,11 @@ export const SyncEventSchema = z.discriminatedUnion('type', [
         type: z.literal('message-cancelled'),
         messageId: z.string(),
         localId: z.string().optional()
+    }),
+    SessionChangedSchema.extend({
+        type: z.literal('session-read-position'),
+        messageId: z.string(),
+        updatedAt: z.number()
     }),
     SessionEventBaseSchema.extend({
         type: z.literal('heartbeat'),

@@ -509,6 +509,24 @@ export function useSSE(options: {
                 }
             }
 
+            if (event.type === 'session-read-position') {
+                queryClient.setQueryData<SessionsResponse | undefined>(queryKeys.sessions, (prev) => {
+                    if (!prev) return prev
+                    const idx = prev.sessions.findIndex((s) => s.id === event.sessionId)
+                    if (idx < 0) return prev
+                    const current = prev.sessions[idx]
+                    if (current.lastReadAt != null && current.lastReadAt >= event.updatedAt) return prev
+                    const next = [...prev.sessions]
+                    next[idx] = { ...current, lastReadMessageId: event.messageId, lastReadAt: event.updatedAt }
+                    return { ...prev, sessions: next }
+                })
+                queryClient.setQueryData<SessionResponse>(queryKeys.session(event.sessionId), (prev) => {
+                    if (!prev?.session) return prev
+                    if (prev.session.lastReadAt != null && prev.session.lastReadAt >= event.updatedAt) return prev
+                    return { ...prev, session: { ...prev.session, lastReadMessageId: event.messageId, lastReadAt: event.updatedAt } }
+                })
+            }
+
             if (event.type === 'machine-updated') {
                 if (isMachineRecord(event.data)) {
                     upsertMachine(event.data)

@@ -289,6 +289,34 @@ export class ApiClient {
         return await this.request<MessagesResponse>(url)
     }
 
+    async locateMessageWindow(
+        sessionId: string,
+        targetMessageId: string,
+        options?: { beforeLimit?: number; afterLimit?: number }
+    ): Promise<unknown> {
+        const params = new URLSearchParams()
+        params.set('messageId', targetMessageId)
+        if (options?.beforeLimit !== undefined) params.set('beforeLimit', `${options.beforeLimit}`)
+        if (options?.afterLimit !== undefined) params.set('afterLimit', `${options.afterLimit}`)
+        return await this.request(
+            `/api/sessions/${encodeURIComponent(sessionId)}/messages/locate?${params.toString()}`
+        )
+    }
+
+    async postReadPosition(
+        sessionId: string,
+        body: { messageId: string; observedAt: number; expectedLastReadAt: number | null }
+    ): Promise<{ ok: true; updatedAt: number } | { ok: false; stale: true; currentUpdatedAt: number | null }> {
+        const resp = await this.request<{ ok: boolean; updatedAt?: number; stale?: boolean; currentUpdatedAt?: number | null }>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/read-position`,
+            { method: 'POST', body: JSON.stringify(body) }
+        )
+        if (resp.stale) {
+            return { ok: false, stale: true, currentUpdatedAt: resp.currentUpdatedAt ?? null }
+        }
+        return { ok: true, updatedAt: resp.updatedAt ?? 0 }
+    }
+
     async getGitStatus(sessionId: string): Promise<GitCommandResponse> {
         return await this.request<GitCommandResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/git-status`)
     }

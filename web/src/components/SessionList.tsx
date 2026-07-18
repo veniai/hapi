@@ -654,15 +654,17 @@ function SessionItem(props: {
         : s.active
             ? 'text-[var(--app-fg)]'
             : 'text-[var(--app-hint)]'
-    const attention = useMemo(
+    const rawAttention = useMemo(
         () => showDetailedStatus
             ? classifySessionAttention(s, {
-                selected,
+                selected: false,
                 lastSeenAt
             })
             : null,
-        [s, selected, showDetailedStatus, lastSeenAt]
+        [s, showDetailedStatus, lastSeenAt]
     )
+    // selected 行 suppress attention（归调用方，spec §5）
+    const attention = selected ? null : rawAttention
     const attentionLabel = attention ? getAttentionLabel(attention, t) : null
     const scheduledLabel = s.futureScheduledMessageCount > 1
         ? t('session.item.scheduledMessages', { count: s.futureScheduledMessageCount })
@@ -688,7 +690,14 @@ function SessionItem(props: {
                         <div className={`truncate text-sm font-medium ${sessionTitleColor}`}>
                             {sessionName}
                         </div>
-                        {s.active && s.thinking ? (
+                        {attention && (attention.kind === 'permission' || attention.kind === 'input') ? (
+                            <SessionAttentionIndicator
+                                attention={attention}
+                                summary={s}
+                                label={attentionLabel ?? ''}
+                                tooltipId={attentionId!}
+                            />
+                        ) : s.active && s.thinking ? (
                             <LoaderIcon className="h-3.5 w-3.5 shrink-0 text-[var(--app-hint)] animate-spin-slow" />
                         ) : attention ? (
                             <SessionAttentionIndicator

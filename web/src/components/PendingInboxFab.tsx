@@ -4,6 +4,7 @@ import type { SessionSummary } from '@/types/api'
 import { useSessions } from '@/hooks/queries/useSessions'
 import { useAppContext } from '@/lib/app-context'
 import { classifySessionAttention } from '@/lib/sessionAttention'
+import { reconcilePendingSessions, compareByPendingSince, getPendingSinceStore } from '@/lib/pending-since-store'
 import { useSessionLastSeenVersion } from '@/hooks/useSessionLastSeen'
 import { getSessionLastSeenStore } from '@/lib/sessionLastSeen'
 import { useTranslation } from '@/lib/use-translation'
@@ -16,7 +17,7 @@ export function getPendingInboxSessions(
     selectedSessionId: string | null,
     lastSeenBySession: Readonly<Record<string, number>>
 ): SessionSummary[] {
-    return sessions.filter((session) => {
+    const pending = sessions.filter((session) => {
         // Archived/inactive sessions cannot be acted on and stale request state can
         // survive their shutdown. The currently open session is already in view.
         if (!session.active || session.id === selectedSessionId) {
@@ -28,6 +29,10 @@ export function getPendingInboxSessions(
         })
         return attention !== null && PENDING_KINDS.has(attention.kind)
     })
+    // Reconcile pendingSince (首帧原子,不闪) + sort (新完成追加末尾,不插队)
+    reconcilePendingSessions(pending.map((s) => s.id))
+    const store = getPendingSinceStore()
+    return [...pending].sort((a, b) => compareByPendingSince(a, b, store))
 }
 
 /**

@@ -19,17 +19,19 @@ function makeSummary(overrides: Partial<SessionSummary> & { id: string }): Sessi
         nextScheduledAt: null,
         model: null,
         effort: null,
+        lastReadMessageId: null,
+        lastReadAt: null,
         ...overrides
     }
 }
 
 describe('classifySessionAttention', () => {
-    it('returns null for the selected session', () => {
+    it('selected no longer suppresses pending requests (UI handles)', () => {
         const attention = classifySessionAttention(
             makeSummary({ id: 'a', pendingRequestKinds: ['permission'] }),
             { selected: true, lastSeenAt: 0 }
         )
-        expect(attention).toBeNull()
+        expect(attention).toEqual({ kind: 'permission' })
     })
 
     it('returns null for archived sessions even when stale requests remain', () => {
@@ -133,11 +135,11 @@ describe('classifySessionAttention', () => {
         expect(attention).toBeNull()
     })
 
-    it('selected still wins over a thinking pending request', () => {
+    it('selected no longer suppresses thinking pending requests', () => {
         const attention = classifySessionAttention(
             makeSummary({ id: 'a', thinking: true, pendingRequestKinds: ['input'] }),
             { selected: true, lastSeenAt: 0 }
         )
-        expect(attention).toBeNull()
+        expect(attention).toEqual({ kind: 'input' })
     })
 })

@@ -4,6 +4,7 @@ import {
     getPermissionModesForFlavor,
     isPermissionModeAllowedForFlavor,
     RenameSessionRequestSchema,
+    ReadPositionRequestSchema,
     ResumeSessionRequestSchema,
     SessionCollaborationModeRequestSchema,
     SessionEffortRequestSchema,
@@ -145,6 +146,30 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
 
         return c.json(result.status)
+    })
+
+    app.post('/sessions/:id/read-position', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) return engine
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) return sessionResult
+        const body = await c.req.json().catch(() => null)
+        const parsed = ReadPositionRequestSchema.safeParse(body)
+        if (!parsed.success) return c.json({ error: 'Invalid body' }, 400)
+        const { messageId, observedAt, expectedLastReadAt } = parsed.data
+        if (observedAt > Date.now() + 60_000) {
+            return c.json({ error: 'observedAt too far in the future', code: 'future_ts' }, 400)
+        }
+        const namespace = c.get('namespace')
+        const result = engine.updateSessionReadPosition(
+            sessionResult.sessionId, namespace, messageId, observedAt, expectedLastReadAt ?? null
+        )
+        if (result.result === 'not-found') return c.json({ error: 'Session not found' }, 404)
+        if (result.result === 'stale') {
+            const current = engine.getSessionReadPosition(sessionResult.sessionId, namespace)
+            return c.json({ error: 'stale', code: 'stale', currentUpdatedAt: current?.observedAt ?? null }, 409)
+        }
+        return c.json({ ok: true, updatedAt: result.updatedAt })
     })
 
     app.post('/sessions/:id/resume', async (c) => {

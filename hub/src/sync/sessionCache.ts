@@ -171,7 +171,9 @@ export class SessionCache {
             effort: stored.effort,
             serviceTier: stored.serviceTier,
             permissionMode: existing?.permissionMode ?? metadata?.preferredPermissionMode,
-            collaborationMode: existing?.collaborationMode
+            collaborationMode: existing?.collaborationMode,
+            lastReadMessageId: stored.lastReadMessageId,
+            lastReadAt: stored.lastReadAt
         }
 
         this.sessions.set(sessionId, session)
