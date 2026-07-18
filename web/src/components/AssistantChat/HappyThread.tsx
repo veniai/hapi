@@ -22,6 +22,7 @@ import {
 type ScrollAnchor = {
     id: string
     topOffset: number
+    messageId?: string
 }
 
 type PendingScrollRestore = {
@@ -85,9 +86,14 @@ export function captureScrollAnchor(viewport: HTMLElement): ScrollAnchor | null 
     for (const message of messages) {
         const rect = message.getBoundingClientRect()
         if (rect.bottom > viewportRect.top && rect.top < viewportRect.bottom) {
+            // Parse raw messageId from DOM id (hapi-message-${id}) for cross-device sync
+            const messageId = message.id.startsWith('hapi-message-')
+                ? message.id.slice('hapi-message-'.length)
+                : message.id
             return {
                 id: message.id,
-                topOffset: rect.top - viewportRect.top
+                topOffset: rect.top - viewportRect.top,
+                messageId
             }
         }
     }
