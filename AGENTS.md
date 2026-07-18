@@ -86,7 +86,7 @@ Branches: `main` → tracks `upstream/main`; `deploy` → live, worktree `/home/
 ### Change → live
 
 1. Develop on `work/current`; verify `bun typecheck && bun run test`.
-2. Move to deploy: `cd /home/claw/deploy/hapi && git merge work/current` (or `git cherry-pick <sha>`).
+2. Move to deploy: `cd /home/claw/deploy/hapi && git merge --ff-only work/current` (or `git cherry-pick <sha>`). `--ff-only` keeps deploy a clean mirror of work/current — refuses if deploy has diverged (fix it on `work/current` first), never produces merge commits. Never commit directly on `deploy`.
 3. Apply by scope: web → `bun run build:web` then restart `hapi-web`; hub → restart `hapi-hub`; cli → restart `hapi-runner`; shared → restart all three. (hub/cli run source — no build needed.)
 4. Restarting `hapi-hub`/`hapi-runner` interrupts running agent sessions.
 5. Verify at `hapi.zhetengde.xyz` (or `localhost:3006` / `:5173`).
