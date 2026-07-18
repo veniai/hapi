@@ -108,4 +108,36 @@ describe('classifySessionAttention', () => {
         )
         expect(attention).toEqual({ kind: 'unread' })
     })
+
+    it('surfaces input request even while thinking (AskUserQuestion)', () => {
+        const attention = classifySessionAttention(
+            makeSummary({ id: 'a', thinking: true, pendingRequestKinds: ['input'], pendingRequestsCount: 1 }),
+            { selected: false, lastSeenAt: 0 }
+        )
+        expect(attention).toEqual({ kind: 'input' })
+    })
+
+    it('surfaces permission request even while thinking', () => {
+        const attention = classifySessionAttention(
+            makeSummary({ id: 'a', thinking: true, pendingRequestKinds: ['permission'], pendingRequestsCount: 1 }),
+            { selected: false, lastSeenAt: 0 }
+        )
+        expect(attention).toEqual({ kind: 'permission' })
+    })
+
+    it('still suppresses unread/background for thinking sessions without pending requests', () => {
+        const attention = classifySessionAttention(
+            makeSummary({ id: 'a', thinking: true, backgroundTaskCount: 2, updatedAt: 5000 }),
+            { selected: false, lastSeenAt: 0 }
+        )
+        expect(attention).toBeNull()
+    })
+
+    it('selected still wins over a thinking pending request', () => {
+        const attention = classifySessionAttention(
+            makeSummary({ id: 'a', thinking: true, pendingRequestKinds: ['input'] }),
+            { selected: true, lastSeenAt: 0 }
+        )
+        expect(attention).toBeNull()
+    })
 })
