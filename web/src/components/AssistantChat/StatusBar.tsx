@@ -148,6 +148,7 @@ export function StatusBar(props: {
     contextSize?: number
     contextCacheRead?: number
     contextWindow?: number | null
+    contextEstimated?: boolean
     model?: string | null
     modelReasoningEffort?: string | null
     serviceTier?: string | null
@@ -175,17 +176,19 @@ export function StatusBar(props: {
     const contextUsageLabel = useMemo(() => {
         if (props.contextSize === undefined) return null
         const maxContextSize = props.contextWindow ?? getContextBudgetTokens(props.model, props.agentFlavor)
-        if (!maxContextSize) return `ctx ${formatTokenCount(props.contextSize)}`
+        const estimateMarker = props.contextEstimated ? '~' : ''
+        if (!maxContextSize) return `ctx ${estimateMarker}${formatTokenCount(props.contextSize)}`
         const percentageUsed = Math.min(100, Math.round((props.contextSize / maxContextSize) * 100))
-        return `ctx ${formatTokenCount(props.contextSize)}/${formatTokenCount(maxContextSize)} (${percentageUsed}%)`
-    }, [props.contextSize, props.contextWindow, props.model, props.agentFlavor])
+        return `ctx ${estimateMarker}${formatTokenCount(props.contextSize)}/${formatTokenCount(maxContextSize)} (${estimateMarker}${percentageUsed}%)`
+    }, [props.contextSize, props.contextWindow, props.contextEstimated, props.model, props.agentFlavor])
     const compactContextUsageLabel = useMemo(() => {
         if (props.contextSize === undefined) return null
         const maxContextSize = props.contextWindow ?? getContextBudgetTokens(props.model, props.agentFlavor)
-        if (!maxContextSize) return `ctx ${formatTokenCount(props.contextSize)}`
+        const estimateMarker = props.contextEstimated ? '~' : ''
+        if (!maxContextSize) return `ctx ${estimateMarker}${formatTokenCount(props.contextSize)}`
         const percentageLeft = Math.max(0, Math.round(100 - (props.contextSize / maxContextSize) * 100))
-        return `ctx ${formatTokenCount(maxContextSize).toUpperCase()}, ${percentageLeft}% left`
-    }, [props.contextSize, props.contextWindow, props.model, props.agentFlavor])
+        return `ctx ${formatTokenCount(maxContextSize).toUpperCase()}, ${estimateMarker}${percentageLeft}% left`
+    }, [props.contextSize, props.contextWindow, props.contextEstimated, props.model, props.agentFlavor])
     const cacheHitLabel = useMemo(() => {
         if (!props.contextCacheRead || props.contextCacheRead <= 0) return null
         return `cache ${formatTokenCount(props.contextCacheRead)}`

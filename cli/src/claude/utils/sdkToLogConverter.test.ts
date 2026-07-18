@@ -1058,7 +1058,8 @@ describe('SDKToLogConverter', () => {
                 output_tokens: 200,
                 cache_read_input_tokens: 50,
                 cache_creation_input_tokens: 30,
-                context_tokens: 180
+                context_tokens: 180,
+                context_estimated: true
             })
             expect(carrier.uuid).toBeTruthy()
             expect(carrier.timestamp).toBeTruthy()
@@ -1129,8 +1130,37 @@ describe('SDKToLogConverter', () => {
                 input_tokens: 13_801,
                 output_tokens: 34,
                 cache_read_input_tokens: 6_101,
-                context_tokens: 19_902
+                context_tokens: 19_902,
+                context_estimated: true
             })
+        })
+
+        it('原生 Claude 有逐请求 usage 时不需要 result carrier', () => {
+            converter.convert({ type: 'system', subtype: 'init', session_id: 's', model: 'claude-opus-4-8' } as any)
+            converter.convert({
+                type: 'assistant',
+                message: {
+                    role: 'assistant',
+                    content: [{ type: 'text', text: 'done' }],
+                    usage: { input_tokens: 3, output_tokens: 8, cache_read_input_tokens: 20_000 }
+                }
+            } as any)
+
+            expect(converter.needsResultUsageCarrier()).toBe(false)
+        })
+
+        it('GLM assistant usage 为零占位时仍需要 result carrier', () => {
+            converter.convert({ type: 'system', subtype: 'init', session_id: 's', model: 'glm-5.2[1m]' } as any)
+            converter.convert({
+                type: 'assistant',
+                message: {
+                    role: 'assistant',
+                    content: [{ type: 'text', text: 'done' }],
+                    usage: { input_tokens: 0, output_tokens: 0 }
+                }
+            } as any)
+
+            expect(converter.needsResultUsageCarrier()).toBe(true)
         })
     })
 })

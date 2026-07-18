@@ -79,6 +79,7 @@ export class SDKToLogConverter {
     // — rather than a single sticky number — means a mid-session model switch picks up the
     // new model's own window immediately instead of inheriting the previous model's.
     private modelContextWindows = new Map<string, number>()
+    private sawMainAssistantUsageThisTurn = false
 
     constructor(
         context: Omit<ConversionContext, 'parentUuid'>,
@@ -271,6 +272,18 @@ export class SDKToLogConverter {
                         usage.context_window = contextWindow
                     }
                 }
+                if (!assistantMsg.parent_tool_use_id && message && typeof message.usage === 'object' && message.usage !== null) {
+                    const usage = message.usage as Record<string, unknown>
+                    const tokenFields = [
+                        usage.input_tokens,
+                        usage.output_tokens,
+                        usage.cache_read_input_tokens,
+                        usage.cache_creation_input_tokens
+                    ]
+                    if (tokenFields.some((value) => typeof value === 'number' && value > 0)) {
+                        this.sawMainAssistantUsageThisTurn = true
+                    }
+                }
                 logMessage = {
                     ...baseFields,
                     type: 'assistant',
@@ -304,6 +317,7 @@ export class SDKToLogConverter {
                 // 200k<->1M flicker. Only seed a heuristic when this model has no cached
                 // value yet (first time we see it in this session).
                 if (systemMsg.subtype === 'init' && typeof systemMsg.model === 'string') {
+                    this.sawMainAssistantUsageThisTurn = false
                     this.resolvedModel = systemMsg.model
                     this.resolvedContextWindowKey = this.computeContextWindowKey(systemMsg.model)
                     if (!this.modelContextWindows.has(this.resolvedContextWindowKey)) {
@@ -414,11 +428,18 @@ export class SDKToLogConverter {
         return logMessage
     }
 
+    needsResultUsageCarrier(): boolean {
+        return !this.sawMainAssistantUsageThisTurn
+    }
+
     /**
-     * 由 result.usage 构造一条「usage 载体」assistant 消息：空 content + 真实 usage
+     * 由 result.usage 构造一条「usage 载体」assistant 消息：空 content + 估算 usage
      * （+ context_window）。修复A：GLM 等 Anthropic-compatible 供应商的真实 token 只
      * 在 result 里、流式 assistant 的 usage 是 {0,0} 占位，故追加这条载体走现有落库
-     * 链路，被 web reducer 反向扫描命中以驱动 ctx 读数；空 content 经 normalizeAgent
+     * 链路，被 web reducer 反向扫描命中以驱动 ctx 读数。result 是整轮累计值，载体
+     * 只能按 num_turns 给出单次请求平均值，并以 context_estimated 标记；原生 Claude
+     * 有有效的逐请求 assistant usage 时，launcher 不会创建载体。
+     * 空 content 经 normalizeAgent
      * 产 0 个 block、不渲染成气泡。
      *
      * 载体须为本轮最后一条带 usage 的消息（靠 launcher 队列顺序保证）。**不更新
@@ -443,19 +464,26 @@ export class SDKToLogConverter {
         // per-request usage and do not rely on this carrier.
         const divisor = Number.isInteger(numTurns) && numTurns > 0 ? numTurns : 1
         const perRequest = (value: number | undefined): number => Math.round((value ?? 0) / divisor)
-        const carrierUsage: Record<string, number> = {
-            input_tokens: perRequest(usage.input_tokens),
-            output_tokens: perRequest(usage.output_tokens)
+        const inputTokens = perRequest(usage.input_tokens)
+        const outputTokens = perRequest(usage.output_tokens)
+        const cacheReadTokens = usage.cache_read_input_tokens === undefined
+            ? undefined
+            : perRequest(usage.cache_read_input_tokens)
+        const cacheCreationTokens = usage.cache_creation_input_tokens === undefined
+            ? undefined
+            : perRequest(usage.cache_creation_input_tokens)
+        const carrierUsage: Record<string, number | boolean> = {
+            input_tokens: inputTokens,
+            output_tokens: outputTokens,
+            context_tokens: inputTokens + (cacheReadTokens ?? 0) + (cacheCreationTokens ?? 0),
+            context_estimated: true
         }
-        if (usage.cache_read_input_tokens !== undefined) {
-            carrierUsage.cache_read_input_tokens = perRequest(usage.cache_read_input_tokens)
+        if (cacheReadTokens !== undefined) {
+            carrierUsage.cache_read_input_tokens = cacheReadTokens
         }
-        if (usage.cache_creation_input_tokens !== undefined) {
-            carrierUsage.cache_creation_input_tokens = perRequest(usage.cache_creation_input_tokens)
+        if (cacheCreationTokens !== undefined) {
+            carrierUsage.cache_creation_input_tokens = cacheCreationTokens
         }
-        carrierUsage.context_tokens = carrierUsage.input_tokens
-            + (carrierUsage.cache_read_input_tokens ?? 0)
-            + (carrierUsage.cache_creation_input_tokens ?? 0)
         if (contextWindow !== undefined) {
             carrierUsage.context_window = contextWindow
         }
