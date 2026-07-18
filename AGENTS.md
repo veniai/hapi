@@ -20,14 +20,16 @@ This file is the editable source for the generated project `AGENTS.md`. Edit thi
 - **Commands (run from repo root):**
   - `bun typecheck` — all packages
   - `bun run test` — all packages (cli + hub + web + shared), Vitest
-  - `bun run test:e2e` — Playwright e2e
-- **Source/purpose:** matches `.github/workflows/test.yml`; this is the pre-push mechanical gate. Test files `*.test.ts(x)` live next to source.
-- **Build artifacts:** `bun run build:web` (web dist, deploy step for web), `bun run build:single-exe` (all-in-one binary).
+  - `bun run build:web` — web dist; **local / pre-promotion gate**（typecheck/test 过 ≠ 能 build）。**GitHub CI gate 待实现**（`test.yml` 当前只 install+typecheck+test，不跑 build）。
+  - `bun run test:e2e` — Playwright e2e (slow; not in default gate)
+- **cli test caveat:** `cli/src/runner/runner.integration.test.ts` writes the real `cli/package.json` (auto-restored in `finally`, but not under SIGKILL/timeout). **Deploy-host full gate =** `(cd cli && bun run tools:unpack && bunx vitest run --exclude '**/*.integration.test.ts') && bun run test:hub && bun run test:web && bun run test:shared`（exclude cli integration，keep hub/web/shared；用 bunx 因 deploy job PATH 不含 node_modules/.bin）。
+- **Source/purpose:** pre-push mechanical gate（typecheck+test 对应 `test.yml`；build:web 是本地/部署门，未进 GitHub CI）。Test files `*.test.ts(x)` live next to source.
+- **Build artifacts:** `bun run build:single-exe` (all-in-one binary, release only).
 
 ## Permission Envelope
 
 - **Allowed without additional approval:** local code edits on `work/current`; side-effect-free local checks (typecheck, tests, lint) in a trusted workspace.
-- **Requires approval:** anything reaching **live**. Live = systemd user services (`hapi-hub`, `hapi-web`, `hapi-runner`) running the `deploy` branch from worktree `/home/claw/deploy/hapi`; public via Cloudflare at `hapi.zhetengde.xyz`.
+- **Requires approval:** anything reaching **live** **unless covered by the standing authorization below**. Live = systemd user services (`hapi-hub`, `hapi-web`, `hapi-runner`) running the `deploy` branch from worktree `/home/claw/deploy/hapi`; public via Cloudflare at `hapi.zhetengde.xyz`.
 - **Change → live flow:**
   1. Develop on `work/current`; verify `bun typecheck && bun run test`.
   2. Move to deploy: `cd /home/claw/deploy/hapi && git merge --ff-only work/current` (or `git cherry-pick <sha>`). `--ff-only` keeps deploy a clean mirror — refuses on divergence (fix on `work/current` first), never produces merge commits.
@@ -35,6 +37,35 @@ This file is the editable source for the generated project `AGENTS.md`. Edit thi
   4. Restarting `hapi-hub`/`hapi-runner` interrupts running agent sessions.
   5. Verify at `hapi.zhetengde.xyz` (or `localhost:3006` / `:5173`).
 - **Forbidden:** committing directly on `deploy`; any merge commit on `deploy` (use `--ff-only` only); running `bun run dev` while prod occupies ports 3006/5173 (stop prod first or use alt port).
+- **Standing Authorization（用户授予，直到撤销；常规部署 auto 的权限来源）：**
+  - **授权：** Routine 部署的 Goal B —— restart + 验证 + Routine 回滚（reset 到 last-good SHA + restart，**无 DB restore**）。
+  - **触发（机械验，全满足才 auto）：** CI 过 + promotion SHA == deploy HEAD + 非 migration（`SCHEMA_VERSION` 数值未变，判定 fail-closed，见下）。
+  - **不授权（仍人批）：** migration 部署 + DB restore（丢数据）+ 超 K/L 上限。
+  - **撤销：** 改本节 → `cortex init`。
+  - 注：本 standing authorization 是**用户预授予**，非 Goal 自授（Cortex 红线：Goal 不能自扩权）。
+- **High-risk deploy = two-phase, branched authorization (Cortex permission envelope):**
+  - **Goal A (prepare):** build + capture baseline (commit SHA + `user_version`) + rollback plan + **DB snapshot**（**SQLite backup API**：`sqlite3 ~/.hapi/hapi.db ".backup ~/.hapi/hapi.db.pre-deploy-<run-id>"` 或 bun:sqlite backup——**非 cp**：hub 用 WAL，cp 主 db 漏 `-wal` 事务；快照后 `PRAGMA integrity_check` + 读 `user_version` 验证可恢复；run-id 安全字符集 + 独占创建 + 拒 symlink）。
+  - **Migration 判定（fail-closed）：** 比较 last-good SHA 与 immutable target SHA 中 `hub/src/store/index.ts` 的 `SCHEMA_VERSION` 数值；**无法解析 / 值变化 / deploy HEAD 漂移 → 一律进 Migration（停，不 auto）**。restart 前再验 `deploy HEAD == authorized target SHA`。
+  - **Authorization branches（状态机，互斥）:**
+    - **Routine（非 migration）:** Goal A 完成 + 判定非 migration → `authorized-by-standing-authorization`（机械验 CI 过 + SHA 匹配，**权限来源 = 上方 Standing Authorization，非 Goal 自授**）→ **直接 Goal B，无人 gate**。
+    - **Migration:** Goal A 完成 → `ready-for-approval` → **人显式 grant** → Goal B。
+  - **Goal B（execute）+ rollback（拆）:** `systemctl restart` + verify（`/health` + readiness + commit 校验）。Health check 是**证据，非批准**。验证失败回滚**拆**：
+    - **Routine 回滚**（schema 未变）：`git reset` 到 last-good SHA + restart（**无 DB restore**——DB 没动）。Standing auth 预授权。
+    - **DB restore**（migration 失败 / schema 变）：进 `rollback-ready-for-approval`（展示快照 + 当前 DB + 写入时间窗 + 预计丢失）→ **人 grant 后执行**（丢数据，必须人批）。
+
+## Agent Dev Loop (后半执行循环)
+
+> 详见 `doc/spec/agent-dev-loop.md`（设计稿 v2，Codex 审过）。Cortex 提供框架（Goal Contract / permission envelope / 原生验证声明）；循环执行靠 agent + `hapi-deploy-run`。
+
+单循环（一个 agent 循环贯穿 CI + 部署 + live 验证，失败回改）：
+- **本地验证门**：typecheck + test + build:web（在 `work/current` 跑）。
+- **promotion**：`git merge --ff-only work/current` → deploy worktree；**live SHA 必须等于 CI 过的 SHA**。
+- **部署门**：准备（build + DB 快照 + 基线）→ 授权（envelope / 人批 migration）→ restart → 验证（`/health` + readiness + commit 校验）。
+- **失败回滚**：三路径（代码失败 / 部分迁移 / 迁移后失败），DB 快照为基础；先回滚保 live，再回改，**不在坏 live 上循环**。
+- **计数**：run ID + attempt ≤ K=8 / redeploy ≤ L=3，执行器强制 + 持久化（跨会话恢复）。**agent 目标任务生成 run-id，经 `HAPI_DEPLOY_RUN_ID=<run-id> hapi-deploy` 传入，跨 attempt 复用**（state: `~/.hapi/deploy-runs/<run-id>.json`）；超限 `hapi-deploy-run` 拒 + 钉钉叫人。
+- **收尾**：Finish 报告（达成 + 外部证据 + 未决不确定 + 未越边界）→ **human-accepted**（显式状态）→ 洁癖（规约端 reconcile + 代码/记忆端 agent 配合）→ 清理（消费 human-accepted）。
+
+**状态（诚实）：** 循环规约 = 设计稿定稿；执行器 `hapi-deploy-run` 现状 = `bun install + typecheck + build:web + systemctl restart + web / + hub /api/sessions(401)`，**无 test、未用 `/health`/readiness/commit 探针、无回滚/通知/计数/DB 快照/promotion SHA 绑定**（见 `agent-dev-loop.md` §8）。落地前再让 Codex 复审。
 
 ## Imported Instructions Pending Reconciliation
 
