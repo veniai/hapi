@@ -8,6 +8,7 @@ import {
     getScrollIntent,
     locateOutlineTargetMessage,
     readChatScrollPosition,
+    resolveSavedScrollPosition,
     restoreScrollAnchor,
     writeChatScrollPosition,
 } from '@/components/AssistantChat/HappyThread'
@@ -206,5 +207,19 @@ describe('chat scroll persistence', () => {
 
         expect(readChatScrollPosition('session-a')).toBe(124)
         expect(readChatScrollPosition('session-b')).toBe(0)
+    })
+
+    it('keeps the original target pending while async content is too short', () => {
+        expect(resolveSavedScrollPosition(2000, 200, false)).toEqual({
+            scrollTop: 200,
+            pendingScrollTop: 2000
+        })
+    })
+
+    it('releases the target only after the full saved position is reachable', () => {
+        expect(resolveSavedScrollPosition(2000, 2400, false)).toEqual({
+            scrollTop: 2000,
+            pendingScrollTop: null
+        })
     })
 })
