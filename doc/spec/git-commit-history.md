@@ -18,6 +18,44 @@
 
 ---
 
+## 功能点 B · 桌面端三栏（列表 | Files | 聊天）— files 面板不遮挡聊天（用户追加 · 2026-07-18）
+
+> 状态：**方案已拍板（2026-07-18），代码尚未改动**。与 commit-history（功能点 A）同属「会话 git 面板」体验，但独立成项、**互不前置**——任一可单独做。**实现顺序：先 A 后 B**（2026-07-18 定）。
+
+**目的**：桌面宽屏浏览器上，点会话头部「文件按钮」进 files/git 面板时，**不要替换/遮挡当前聊天对话**——把详情区拆开、与列表并排成**三栏：列表 | Files（含 Git） | 聊天**，**聊天在最右**、Files 在中间，边查 git 边看对话。
+
+**当前行为**（已核实 `web/src/router.tsx`）：详情区（`:577`）是单 `<Outlet/>`（`:579`），files 是会话的二级路由（`sessionFilesRoute` `:1171`，`/sessions/$id/files`，渲染 `FilesPage`）。进 files 路由 → Outlet 渲染 FilesPage、SessionChat 不在屏 → **聊天被 files 替换**。桌面端进 files 后仍是两栏（列表 | files），聊天消失。
+
+**范围**：
+- 仅**桌面宽屏**（沿用现有 `lg:` 断点，`:496`/`:577` 那套）。**手机/窄屏不动**——保持现状全屏覆盖（屏窄无三栏空间，且手机返回栈语义依赖 files 作二级页 push，见 `web-session-back-stack.md`）。
+- 触发：点「文件按钮」。桌面 = 展开 Files 为中间栏（聊天保留在最右、可见）；手机 = 现状全覆盖（不变）。
+
+**与 commit-history（功能点 A）的关系**：A 让 files 从 2 tab 变 3 tab（变更 | 目录 | 提交记录）、内容更重 → 三栏「边查边聊」价值更高，两者配套。但**不互为前置**。
+
+**拍板（2026-07-18，用户确认）**：
+
+> 心智模型：**VS Code 式**——中栏 Files 列表常驻（像 Explorer），右栏随点开的文件换内容（聊天 ↔ 文件 diff），左栏会话列表不动。
+
+1. **路由形态**：`/sessions/$id/files`、`/sessions/$id/file` **仍是真实路由**（桌面 + 手机一致），桌面端只改**渲染**——详情区由单 `<Outlet/>`（`router.tsx:579`）改为「**SessionChat 常驻 + 旁挂 Files 列**」。桌面三栏 `列表 | Files | 聊天`，**聊天常驻最右可见**；手机/窄屏不变（全覆盖）。SessionChat 提到 session 父布局常驻渲染、不再随 `/files` 路由卸载（**顺带修**「开 files 丢聊天滚动位置」）。
+2. **第三栏宽度 / 收起**：Files 列宽度**可拖拽**——复用 `useSidebarResize`（`router.tsx:240`，hook import `:27`）加第二个 resize handle，宽度独立存 localStorage（新 key，不与左 sidebar 共享）。点「文件按钮」**toggle**：在 `/sessions/$id` → 导航到 `/files`（展开中栏）；在 `/files` → 导航回 `/sessions/$id`（收起）。
+3. **files 下钻（选 A · VS Code 式）**：点单文件 diff（`/sessions/$id/file`）→ 桌面**右栏内容切换** 聊天 → diff（中栏文件列表常驻、可连续点多个文件）；返回 → diff 消失、聊天回来。手机仍全屏 diff。
+4. **与返回栈 spec 对齐**：**无需重对齐**——桌面保留 `/files` `/file` 为真实路由，history 栈语义与手机一致（返回 `/file` → `/files` → `/sessions/$id`），只是桌面画成并排列、手机画成覆盖层。`web-session-back-stack.md`「files = 会话内二级页 push」假设**继续成立**。
+
+**硬约束**：
+- **不破坏**现有桌面 split view（列表 | 详情，`:496`/`:577` 的 `isSessionsIndex` 互斥）——Files 列只在**详情区内**并排，不动列表/详情互斥、不动 `isSessionsIndex` 分支语义。
+- **手机/窄屏行为零变化**（全覆盖回归基线）。
+- 第二个 resize handle 不影响既有左 sidebar handle；SessionChat 提常驻后其 props / 滚动行为须保持（回归验证）。
+
+**Done 条件**：
+- 桌面 `/files` → 三栏、聊天最右可见、SessionChat 不重新挂载（滚动位置保留）。
+- Files 列宽可拖拽 + 刷新后持久化；点「文件按钮」toggle 展开 / 收起。
+- 点单文件 → 右栏切 diff、中栏文件列表保留可换文件；返回回聊天。
+- 手机/窄屏：files/file 仍全覆盖（零变化）。
+- 浏览器返回语义桌面与手机一致（`/file` → `/files` → `/sessions/$id`）。
+- `bun typecheck:web && bun run test:web` 通过。
+
+---
+
 ## 贯穿原则
 
 - **只读**：纯查看，不 stage / commit / push / discard，不动用户仓库（与「能操作」那档严格区分）。
@@ -33,6 +71,18 @@
 - 本地起的会话：cwd = 启动时终端所在目录；远程起（web/手机「新建」选文件夹）：cwd = 选的目录。
 - 故「提交历史」= 该目录当前分支的 log。worktree 类型会话（新建表单 `sessionType: 'worktree'`）的 cwd 是隔离的 `hapi-xxxx` 分支目录 → 历史看那条分支。
 - 推论：同一目录的多个 simple 会话共享同一分支历史；切分支后全部跟着变。
+
+---
+
+## 前置条件 / 老会话边界
+
+本功能（与现有 Changes/Diff 一样）依赖会话记录的工作目录 `session.metadata.path`。该字段**可选**（`metadata` 本身 `MetadataSchema.nullable()`、`path` 可缺），故：
+
+- **无路径的会话**（早期未记录 path、或某些 agent/模式不上报 cwd）：**文件图标本身不显示**（`files.tsx`、`SessionChat.tsx` 以 `session.metadata?.path` 门控 `onToggleFiles`）→ 根本进不了 git 面板。**这不是新缺口**——现有 Changes tab 同样如此。
+- **有路径但目录已删 / 移走 / 非 git 仓库**：hub 拿到 path 后跑 `git log`，git 失败 → `runGitCommand` 捕获 → `{ success:false, error }` → `CommitHistory` 走 error 分支显示提示（与现有 `formatGitStatusError` 同源降级）。
+- **有路径且是 git 仓库**：正常显示历史。
+
+即：commit-history **继承、不放大**现有 git 功能的边界，无需为老会话特殊处理——降级路径已具备。
 
 ---
 
