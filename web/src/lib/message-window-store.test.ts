@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { ApiClient } from '@/api/client'
+import { ApiError, type ApiClient } from '@/api/client'
 import type { DecryptedMessage, MessageStatus } from '@/types/api'
 import {
     appendOptimisticMessage,
@@ -785,16 +785,43 @@ describe('fetchLocatedWindow', () => {
         expect(state.hasMore).toBe(false)         // !hasOlder
     })
 
-    it('returns not-found when the target is gone (locator throws)', async () => {
+    it('returns not-found on HTTP 404 (target gone) — caller may clear saved', async () => {
         const api = {
             locateMessageWindow: vi.fn(async () => {
-                throw new Error('HTTP 404 Not Found')
+                throw new ApiError('HTTP 404 Not Found', 404)
             })
         } as unknown as ApiClient
 
         const result = await fetchLocatedWindow(api, SESSION_ID, 'gone-msg')
 
         expect(result).toEqual({ ok: false, reason: 'not-found' })
+    })
+
+    it('returns failed (NOT not-found) on 500 / network — saved must survive', async () => {
+        const api = {
+            locateMessageWindow: vi.fn(async () => {
+                throw new ApiError('HTTP 500', 500)
+            })
+        } as unknown as ApiClient
+
+        const result = await fetchLocatedWindow(api, SESSION_ID, 'target-msg')
+
+        expect(result).toEqual({ ok: false, reason: 'failed' })
+    })
+
+    it('returns busy (NOT not-found) when a latest load is in flight', async () => {
+        // Seed an in-flight latest load so isLoading=true.
+        const slowApi = {
+            locateMessageWindow: vi.fn(async () => ({ messages: [], target: null, olderCursor: null, hasOlder: false, newerCursor: null, hasNewer: false })),
+            getMessages: vi.fn(async () => {
+                await new Promise((r) => setTimeout(r, 50))
+                return { messages: [], page: { limit: 50, nextBeforeAt: null, nextBeforeSeq: null, hasMore: false } }
+            })
+        } as unknown as ApiClient
+        const p = fetchLatestMessages(slowApi as unknown as ApiClient, SESSION_ID) // sets isLoading
+        const result = await fetchLocatedWindow(slowApi as unknown as ApiClient, SESSION_ID, 'target-msg')
+        await p
+        expect(result).toEqual({ ok: false, reason: 'busy' })
     })
 })
 
@@ -885,5 +912,28 @@ describe('fetchNewerMessages', () => {
         await fetchNewerMessages(api, SESSION_ID)
 
         expect((api.getMessages as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled()
+    })
+
+    it('drops a stale fetchNewer response when a replacement bumps the epoch mid-flight', async () => {
+        await seedLocatedWindow(true, { at: 1_000, seq: 5 })
+        const staleMsg = makeAgentMessage({ id: 'stale-newer', seq: 6, createdAt: 1_100 })
+        const api = {
+            getMessages: vi.fn(async () => {
+                // Replacement lands while the fetch is in flight: clear bumps
+                // the epoch (+ all generations), so the in-flight fetchNewer
+                // captured the prior epoch and must NOT commit its stale result.
+                clearMessageWindow(SESSION_ID)
+                return {
+                    messages: [staleMsg],
+                    page: { limit: 50, nextBeforeAt: null, nextBeforeSeq: null, nextAfterAt: null, nextAfterSeq: null, hasMore: false }
+                }
+            })
+        } as unknown as ApiClient
+
+        await fetchNewerMessages(api, SESSION_ID)
+
+        const state = getMessageWindowState(SESSION_ID)
+        expect(state.messages.map((m) => m.id)).not.toContain('stale-newer')
+        expect(state.hasNewer).toBe(false)
     })
 })

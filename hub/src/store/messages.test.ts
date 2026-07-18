@@ -403,6 +403,16 @@ describe('locateMessageWindow', () => {
         expect(win).toBeNull()
     })
 
+    it('returns null when the target id exists but belongs to another session', () => {
+        const store = makeStore()
+        const sessionA = makeSession(store, 'locate-xsession-a')
+        const sessionB = makeSession(store, 'locate-xsession-b')
+        const m = store.messages.addMessage(sessionA.id, { role: 'user', content: { type: 'text', text: '1' } }, 'l1')
+
+        const win = store.messages.locateMessageWindow(sessionB.id, m.id, { beforeLimit: 50, afterLimit: 50 })
+        expect(win).toBeNull()
+    })
+
     it('reports hasOlder/hasNewer when more messages lie beyond the limits', () => {
         const store = makeStore()
         const session = makeSession(store, 'locate-bounds')

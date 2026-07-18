@@ -461,6 +461,8 @@ type SessionChatProps = {
     onSend: (text: string, attachments?: AttachmentMetadata[], scheduledAt?: number | null) => Promise<boolean>
     onFlushPending: () => Promise<void> | void
     onAtBottomChange: (atBottom: boolean) => void
+    /** Initial read-position target (LWW winner); HappyThread scrolls to it on entry. */
+    locatorTargetMessageId: string | null
     /** Located window has messages beyond it; surfacing a "load newer" affordance. */
     hasNewerMessages: boolean
     /** Page forward from a located window toward the latest messages. */
@@ -1364,6 +1366,7 @@ function SessionChatInner(props: SessionChatProps) {
                         findLatestUserMessageId={findLatestUserMessageId}
                         sendScrollPreviousMessageId={sendScrollPreviousMessageId}
                         hubLastReadAt={props.session.lastReadAt ?? null}
+                        locatorTargetMessageId={props.locatorTargetMessageId}
                         hasNewer={props.hasNewerMessages}
                         onFetchNewer={props.onFetchNewer}
                     />

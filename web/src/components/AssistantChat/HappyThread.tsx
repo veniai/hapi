@@ -101,6 +101,27 @@ export function captureScrollAnchor(viewport: HTMLElement): ScrollAnchor | null 
     return null
 }
 
+/** Capture the first FULLY-VISIBLE AGENT message id for read-position reporting
+ *  (§4.5(a) M11: "首条完全可见的 agent 消息"). Returns null when no agent message
+ *  is fully in view — the reporter then keeps the previous anchor (no spurious
+ *  update from user/system or partially-visible messages). Distinct from
+ *  captureScrollAnchor, which accepts any partially-visible message for saved
+ *  scroll restoration. */
+export function captureReadPositionAnchor(viewport: HTMLElement): string | null {
+    const viewportRect = viewport.getBoundingClientRect()
+    const messages = Array.from(viewport.querySelectorAll<HTMLElement>(MESSAGE_ANCHOR_SELECTOR))
+    for (const message of messages) {
+        if (message.dataset.hapiRole !== 'agent') continue
+        const rect = message.getBoundingClientRect()
+        if (rect.top >= viewportRect.top && rect.bottom <= viewportRect.bottom) {
+            return message.id.startsWith('hapi-message-')
+                ? message.id.slice('hapi-message-'.length)
+                : message.id
+        }
+    }
+    return null
+}
+
 export function restoreScrollAnchor(viewport: HTMLElement, anchor: ScrollAnchor): boolean {
     const target = document.getElementById(anchor.id)
     if (!target || !viewport.contains(target)) {
@@ -314,6 +335,11 @@ export function HappyThread(props: {
     /** Hub-side lastReadAt (from session detail / SSE), fed to the read-position
      *  reporter as expectedLastReadAt for the LWW CAS (§4.5(f)). */
     hubLastReadAt: number | null
+    /** Initial read-position target (LWW winner of saved vs hub). When set,
+     *  the viewport scrolls to this message on entry instead of restoring
+     *  saved/bottom — the core fix for §4.3 "落 target". null = no target
+     *  (first-ever visit → bottom; or saved-only restore). */
+    locatorTargetMessageId: string | null
     /** Located window has messages beyond it — show a "load newer" affordance. */
     hasNewer: boolean
     /** Page forward from the located window toward the latest messages. */
@@ -331,8 +357,7 @@ export function HappyThread(props: {
         getAnchorMessageId: () => {
             const viewport = viewportRef.current
             if (!viewport) return null
-            const anchor = captureScrollAnchor(viewport)
-            return anchor?.messageId ?? null
+            return captureReadPositionAnchor(viewport)
         },
         lastKnownHubReadAt: props.hubLastReadAt
     })
@@ -356,6 +381,12 @@ export function HappyThread(props: {
     const forceScrollTokenRef = useRef(props.forceScrollToken)
     const lastScrollTopRef = useRef(0)
     const pendingSavedScrollRef = useRef<PersistedChatScrollPosition | null>(readChatScrollPosition(props.sessionId))
+    // Initial-position target mode: when locatorTargetMessageId is set, the
+    // viewport must land on it (NOT saved/bottom). Stays active until the
+    // target's DOM node is scrolled into view, or bounded retries exhaust
+    // (target filtered/grouped → fallback to default positioning).
+    const locatorTargetActiveRef = useRef(props.locatorTargetMessageId !== null && props.locatorTargetMessageId !== undefined)
+    const locatorTargetRetriesRef = useRef(0)
     const ignoreNextRestorationScrollRef = useRef(false)
     const pendingSendScrollRef = useRef<{ deadline: number; previousMessageId: string | null } | null>(null)
     const pendingBottomScrollRef = useRef(false)
@@ -612,6 +643,9 @@ export function HappyThread(props: {
     }, [clearPendingBottomScroll, settlePendingLoad])
 
     const restoreSavedPosition = useCallback((): boolean => {
+        // Target mode owns the initial position — saved must not override it
+        // (the cross-device case where saved is stale and hub target won LWW).
+        if (locatorTargetActiveRef.current) return false
         const viewport = viewportRef.current
         const saved = pendingSavedScrollRef.current
         if (!viewport || saved === null) return false
@@ -663,6 +697,51 @@ export function HappyThread(props: {
         }
         return true
     }, [recomputeAtBottom, setAtBottomMode, setAutoScrollMode])
+
+    // Initial-position target mode (§4.3 落 target). When a locator target is
+    // set, disable saved restoration and scroll the target into view once its
+    // DOM renders. Retries ride messagesVersion (window load / SSE); bounded
+    // fallback if the target never renders (filtered/grouped message).
+    useLayoutEffect(() => {
+        const target = props.locatorTargetMessageId
+        if (target) {
+            locatorTargetActiveRef.current = true
+            locatorTargetRetriesRef.current = 0
+            // Drop the saved anchor for THIS mount — target owns initial position.
+            // (localStorage saved is untouched; only the in-memory restore ref.)
+            pendingSavedScrollRef.current = null
+        } else {
+            locatorTargetActiveRef.current = false
+        }
+    }, [props.locatorTargetMessageId])
+
+    useLayoutEffect(() => {
+        const target = props.locatorTargetMessageId
+        if (!target || !locatorTargetActiveRef.current) return
+        const viewport = viewportRef.current
+        if (!viewport) return
+        const el = document.getElementById(`hapi-message-${target}`)
+        if (el && viewport.contains(el)) {
+            el.scrollIntoView({ block: 'start' })
+            ignoreNextRestorationScrollRef.current = true
+            lastScrollTopRef.current = viewport.scrollTop
+            requestAnimationFrame(() => {
+                ignoreNextRestorationScrollRef.current = false
+                if (viewportRef.current) {
+                    lastScrollTopRef.current = viewportRef.current.scrollTop
+                }
+            })
+            locatorTargetActiveRef.current = false
+            recomputeAtBottom()
+            return
+        }
+        locatorTargetRetriesRef.current += 1
+        if (locatorTargetRetriesRef.current > 20) {
+            // Bounded fallback: target never rendered — release target mode so
+            // default positioning (recomputeAtBottom) can settle the viewport.
+            locatorTargetActiveRef.current = false
+        }
+    }, [props.locatorTargetMessageId, props.messagesVersion, recomputeAtBottom])
 
     const scrollToSentMessage = useCallback((): boolean => {
         const pending = pendingSendScrollRef.current
