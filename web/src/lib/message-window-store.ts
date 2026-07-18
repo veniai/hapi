@@ -12,6 +12,7 @@ export type MessageWindowState = {
     oldestSeq: number | null
     newestSeq: number | null
     isLoading: boolean
+    hasLoadedLatest: boolean
     isLoadingMore: boolean
     warning: string | null
     atBottom: boolean
@@ -289,6 +290,7 @@ function createState(sessionId: string): InternalState {
         oldestPositionSeq: null,
         newestSeq: null,
         isLoading: false,
+        hasLoadedLatest: false,
         isLoadingMore: false,
         warning: null,
         atBottom: true,
@@ -324,6 +326,7 @@ function hydrateState(sessionId: string): InternalState | null {
             oldestPositionSeq: toNullableNumber(parsed.oldestPositionSeq),
             warning: typeof parsed.warning === 'string' ? parsed.warning : null,
             atBottom: parsed.atBottom !== false,
+            hasLoadedLatest: true,
         })
     } catch {
         clearPersistedState(sessionId)
@@ -570,6 +573,7 @@ function buildState(
         oldestPositionAt?: number | null
         oldestPositionSeq?: number | null
         isLoading?: boolean
+        hasLoadedLatest?: boolean
         isLoadingMore?: boolean
         warning?: string | null
         atBottom?: boolean
@@ -605,6 +609,7 @@ function buildState(
         newestSeq,
         hasMore: updates.hasMore !== undefined ? updates.hasMore : prev.hasMore,
         isLoading: updates.isLoading !== undefined ? updates.isLoading : prev.isLoading,
+        hasLoadedLatest: updates.hasLoadedLatest !== undefined ? updates.hasLoadedLatest : prev.hasLoadedLatest,
         isLoadingMore: updates.isLoadingMore !== undefined ? updates.isLoadingMore : prev.isLoadingMore,
         warning: updates.warning !== undefined ? updates.warning : prev.warning,
         atBottom: updates.atBottom !== undefined ? updates.atBottom : prev.atBottom,
@@ -894,6 +899,7 @@ export async function fetchLatestMessages(api: ApiClient, sessionId: string): Pr
                     oldestPositionAt: nextBeforeAt,
                     oldestPositionSeq: nextBeforeSeq,
                     isLoading: false,
+                    hasLoadedLatest: true,
                     warning: null,
                 })
             }
@@ -909,6 +915,7 @@ export async function fetchLatestMessages(api: ApiClient, sessionId: string): Pr
                 oldestPositionAt: nextBeforeAt,
                 oldestPositionSeq: nextBeforeSeq,
                 isLoading: false,
+                hasLoadedLatest: true,
                 warning: pendingResult.warning,
             })
         })
@@ -917,7 +924,11 @@ export async function fetchLatestMessages(api: ApiClient, sessionId: string): Pr
             return
         }
         const message = error instanceof Error ? error.message : 'Failed to load messages'
-        updateStateForGeneration(sessionId, 'latest', generation, (prev) => buildState(prev, { isLoading: false, warning: message }))
+        updateStateForGeneration(sessionId, 'latest', generation, (prev) => buildState(prev, {
+            isLoading: false,
+            hasLoadedLatest: true,
+            warning: message
+        }))
     }
 }
 

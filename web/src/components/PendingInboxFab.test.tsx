@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SessionSummary } from '@/types/api'
+import { I18nProvider } from '@/lib/i18n-context'
 import { getPendingInboxSessions, PendingInboxFab } from './PendingInboxFab'
 
 const navigateMock = vi.fn()
@@ -76,6 +77,7 @@ describe('PendingInboxFab', () => {
         navigateMock.mockClear()
         selectedSessionId = null
         localStorage.clear()
+        localStorage.setItem('hapi-lang', 'zh-CN')
         sessions = [
             makeSession({ id: 'first', pendingRequestKinds: ['permission'] }),
             makeSession({ id: 'second', pendingRequestKinds: ['input'] }),
@@ -84,7 +86,7 @@ describe('PendingInboxFab', () => {
     })
 
     it('navigates through the queue instead of getting stuck on the current route', () => {
-        const { rerender } = render(<PendingInboxFab />)
+        const { rerender } = render(<I18nProvider><PendingInboxFab /></I18nProvider>)
 
         fireEvent.click(screen.getByRole('button', { name: '待处理 2 个会话' }))
         expect(navigateMock).toHaveBeenLastCalledWith({
@@ -93,7 +95,7 @@ describe('PendingInboxFab', () => {
         })
 
         selectedSessionId = 'first'
-        rerender(<PendingInboxFab />)
+        rerender(<I18nProvider><PendingInboxFab /></I18nProvider>)
         fireEvent.click(screen.getByRole('button', { name: '待处理 1 个会话' }))
         expect(navigateMock).toHaveBeenLastCalledWith({
             to: '/sessions/$sessionId',
@@ -102,7 +104,7 @@ describe('PendingInboxFab', () => {
     })
 
     it('uses the raised safe-area-aware position', () => {
-        render(<PendingInboxFab />)
+        render(<I18nProvider><PendingInboxFab /></I18nProvider>)
         const button = screen.getByRole('button')
         expect(button.style.bottom).toContain('5.5rem')
         expect(button.style.bottom).toContain('--app-floating-bottom-offset')

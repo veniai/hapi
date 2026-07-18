@@ -38,7 +38,11 @@ describe('DingtalkChannel', () => {
     })
 
     function makeChannel(opts: { secret?: string; keyword?: string; publicUrl?: string } = {}): DingtalkChannel {
-        fetchMock.mockResolvedValue({ ok: true, status: 200, text: async () => '' })
+        fetchMock.mockResolvedValue({
+            ok: true,
+            status: 200,
+            text: async () => JSON.stringify({ errcode: 0, errmsg: 'ok' })
+        })
         globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch
         return new DingtalkChannel(
             'https://oapi.dingtalk.com/robot/send?access_token=x',
@@ -79,6 +83,19 @@ describe('DingtalkChannel', () => {
         expect(body.markdown.text).toBe('my-project·待审批 Bash')
     })
 
+    it('sendPermissionRequest 选择 createdAt 最早的审批请求', async () => {
+        const ch = makeChannel()
+        await ch.sendPermissionRequest(makeSession({
+            agentState: {
+                requests: {
+                    later: { tool: 'Write', arguments: {}, createdAt: 20 },
+                    earlier: { tool: 'Read', arguments: {}, createdAt: 10 }
+                }
+            } as any
+        }))
+        expect(lastCall().body.markdown.text).toBe('my-project·待审批 Read')
+    })
+
     it('secret 加签 → URL 含 timestamp & sign 查询参数', async () => {
         const ch = makeChannel({ secret: 'SECabc' })
         await ch.sendReady(makeSession())
@@ -109,5 +126,25 @@ describe('DingtalkChannel', () => {
         expect(body.msgtype).toBe('markdown')
         expect(body.markdown.text).toContain('my-project·空闲')
         expect(body.markdown.text).toMatch(/\[打开会话\]\(https:\/\/hapi\.example\.com\/sessions\/s1\)/)
+    })
+
+    it('HTTP 200 但 errcode 非零时抛出钉钉业务错误', async () => {
+        const ch = makeChannel()
+        fetchMock.mockResolvedValueOnce({
+            ok: true,
+            status: 200,
+            text: async () => JSON.stringify({ errcode: 310000, errmsg: 'keywords not in content' })
+        })
+
+        await expect(ch.sendReady(makeSession())).rejects.toThrow(
+            '钉钉发送失败: errcode 310000 keywords not in content'
+        )
+    })
+
+    it('HTTP 200 但响应不可解析时抛错', async () => {
+        const ch = makeChannel()
+        fetchMock.mockResolvedValueOnce({ ok: true, status: 200, text: async () => '<html>proxy error</html>' })
+
+        await expect(ch.sendReady(makeSession())).rejects.toThrow('钉钉发送失败: 响应不是有效 JSON')
     })
 })

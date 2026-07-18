@@ -114,6 +114,9 @@ async function isGitRoot(directory: string): Promise<boolean> {
             return await pathExists(join(marker, 'HEAD'));
         }
         if (markerStat.isFile()) {
+            if (markerStat.size > 64 * 1024) {
+                return false;
+            }
             const content = await readFile(marker, 'utf-8');
             return /^gitdir:\s*.+$/m.test(content);
         }

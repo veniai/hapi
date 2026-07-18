@@ -19,7 +19,7 @@ import {
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import type { SlashCommand } from '@hapi/protocol/apiTypes'
 import { Hono, type Context } from 'hono'
-import type { SyncEngine, Session } from '../../sync/syncEngine'
+import type { SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { requireSessionFromParam, requireSyncEngine } from './guards'
 
@@ -64,8 +64,6 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         if (engine instanceof Response) {
             return engine
         }
-
-        const getPendingCount = (s: Session) => s.agentState?.requests ? Object.keys(s.agentState.requests).length : 0
 
         const namespace = c.get('namespace')
         const sessionRecords = engine.getSessionsByNamespace(namespace)
