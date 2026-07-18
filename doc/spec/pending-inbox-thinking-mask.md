@@ -1,7 +1,7 @@
 # 待处理浮窗被 thinking 掩盖 — AskUserQuestion 不进红点 spec
 
 > fork: `veniai/hapi` · 工作目录 `/home/claw/projects/hapi` · 基线 `work/current`（2026-07）
-> 状态：**方案已定，代码尚未改动**。本文件仅描述方案，未实现。
+> 状态：**已实现并上线**（commit e4582c5，deploy 2026-07-18）。本文件保留作设计记录。
 > 触发场景：agent 用 AskUserQuestion（或任意权限请求）让用户做选择时，**待处理浮窗（红点）不显示该会话**——明明必须用户操作却被当成「正在思考」藏起来。
 
 ---
@@ -140,9 +140,9 @@ export function classifySessionAttention(
 | 消费者 | 位置 | 传参 | 改后影响 |
 |---|---|---|---|
 | **待处理浮窗** | `PendingInboxFab.tsx:25` | `selected:false`（上游已踢选中） | **修好**——AskUserQuestion / 权限请求会进红点。本 spec 的目标。 |
-| **会话列表详情态** | `SessionList.tsx:659`（仅 `showDetailedStatus`） | 真 `selected`（逐行） | **顺带修好**——thinking 会话有 pending 请求时，详情态也会显示 attention 指示。符合预期，非副作用。 |
+| **会话列表详情态** | `SessionList.tsx:659`（仅 `showDetailedStatus`） | 真 `selected`（逐行） | 分类器会返回 attention，但 `SessionList.tsx:691` 详情态行 thinking 时先渲染转圈 spinner，attention 指示分支不可达——**实际未显示**（Codex review 核实）。主功能（红点）不受影响。 |
 
-> 「顺带修好列表」是改根因（共享分类器）的自然结果，与「修根因不贴膏药」（`AGENTS.md` Critical Thinking §1）一致。**不**为避免影响列表而另造一套浮窗专用判定。
+> 改共享分类器仍是正解——红点（`PendingInboxFab`）是真正的消费者。详情态不显示是 `SessionList.tsx:691` 的渲染顺序（thinking 先画转圈）所致，与分类器无关，不在本 spec 范围。
 
 ---
 

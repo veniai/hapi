@@ -1,7 +1,7 @@
 # 外部通知渠道按页面可见性抑制 — spec（钉钉 / ServerChan / Telegram）
 
 > fork: `veniai/hapi` · 工作目录 `/home/claw/projects/hapi` · 基线 `work/current`（2026-07）
-> 状态：**方案已定，代码尚未改动**。本文件仅描述方案，未实现。
+> 状态：**已实现并上线**（commits e4582c5 + 11bdef1，deploy 2026-07-18）。本文件保留作设计记录。
 > 触发场景：用户正盯着 web 页面看时，钉钉 / ServerChan / Telegram 机器人仍推送「空闲 / 待审批 / 完成」——冗余、吵。
 > **范围**：三个外部渠道一起修——`DingtalkChannel`、`ServerChanChannel`、`HappyBot`(Telegram)。`PushNotificationChannel` 已做(参考实现)。文件名沿用「dingtalk」(原始触发场景),内容覆盖三渠道。
 > **前置依赖**：本 spec 抑制 permission/input 的安全性依赖 [`pending-inbox-thinking-mask.md`](pending-inbox-thinking-mask.md)（红点修 thinking 遮蔽）。两者是同一注意力模型的两半，**须一起落地**（见 §5、§8）。
@@ -101,6 +101,7 @@ if (options.selected || summary.thinking || summary.metadata?.lifecycleState ===
 - **`visible` 含义**（web 端）：`document.visibilityState === 'visible'`。
 - **能抑制**：切别的 app / tab、最小化、锁屏（多数浏览器翻 hidden）、手机锁屏。
 - **不能抑制（已知缺口）**：离开座位、tab 还在前台开着——`visibilityState` 仍 visible。与 push 同源同限制；留待将来加 web idle hook（监听输入事件，空闲 N 分钟本地降级上报 hidden），**hub 不用动**。
+- **可见性竞争（已接受，Codex review）**：通知只在事件触发那一刻判可见性，**不重试**。请求在「可见」时被抑制后，用户随后藏 tab 不会补发——靠红点兜底（permission 回来看见，agent 阻塞等答；完成类 fyi 无害）。这是「在看就不发」的同源代价，非 bug，不修。
 
 ---
 
