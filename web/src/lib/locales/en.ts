@@ -746,6 +746,7 @@ export default {
   'misc.variant': 'Variant',
   'misc.loading': 'Loading…',
   'misc.loadOlder': 'Load older',
+  'misc.loadNewer': 'Load newer',
   'misc.newMessage': '{n} new message{s}',
   'misc.pendingSessions': '{n} sessions need attention',
   'misc.loadingMessages': 'Loading messages…',

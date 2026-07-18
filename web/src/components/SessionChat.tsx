@@ -461,6 +461,10 @@ type SessionChatProps = {
     onSend: (text: string, attachments?: AttachmentMetadata[], scheduledAt?: number | null) => Promise<boolean>
     onFlushPending: () => Promise<void> | void
     onAtBottomChange: (atBottom: boolean) => void
+    /** Located window has messages beyond it; surfacing a "load newer" affordance. */
+    hasNewerMessages: boolean
+    /** Page forward from a located window toward the latest messages. */
+    onFetchNewer: () => Promise<void>
     onRetryMessage?: (localId: string) => void
     autocompleteSuggestions?: (query: string) => Promise<Suggestion[]>
     availableSlashCommands?: readonly SlashCommand[]
@@ -1359,6 +1363,9 @@ function SessionChatInner(props: SessionChatProps) {
                         onOutlineOpenChange={setOutlineOpen}
                         findLatestUserMessageId={findLatestUserMessageId}
                         sendScrollPreviousMessageId={sendScrollPreviousMessageId}
+                        hubLastReadAt={props.session.lastReadAt ?? null}
+                        hasNewer={props.hasNewerMessages}
+                        onFetchNewer={props.onFetchNewer}
                     />
 
                     {codexCollaborationModeSupported && codexModelsState.error ? (

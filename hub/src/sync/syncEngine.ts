@@ -381,6 +381,24 @@ export class SyncEngine {
         return this.messageService.getMessagesPage(sessionId, options)
     }
 
+    /** Forward (newer-than-cursor) pagination for fetchNewerMessages. */
+    getMessagesAfterPage(
+        sessionId: string,
+        options: { limit: number; after?: { at: number; seq: number } | null }
+    ): {
+        messages: DecryptedMessage[]
+        page: {
+            limit: number
+            nextBeforeAt: number | null
+            nextBeforeSeq: number | null
+            nextAfterAt: number | null
+            nextAfterSeq: number | null
+            hasMore: boolean
+        }
+    } {
+        return this.messageService.getMessagesAfterPage(sessionId, options)
+    }
+
     getSessionExport(sessionId: string, session: Session): HapiSessionExportResult {
         return this.messageService.getSessionExport(sessionId, session)
     }

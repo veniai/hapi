@@ -110,8 +110,30 @@ describe('scroll anchor helpers', () => {
 
         expect(captureScrollAnchor(viewport)).toEqual({
             id: 'second-message',
-            topOffset: 20
+            topOffset: 20,
+            messageId: 'second-message'
         })
+
+        viewport.remove()
+    })
+
+    it('parses raw messageId from hapi-message-* DOM ids for cross-device sync', () => {
+        const viewport = document.createElement('div')
+        const message = document.createElement('div')
+        message.id = 'hapi-message-11111111-2222-3333-4444-555555555555'
+        const messages = document.createElement('div')
+        messages.className = 'happy-thread-messages'
+        messages.append(message)
+        viewport.append(messages)
+        document.body.append(viewport)
+
+        vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue(rect({ top: 0, bottom: 500 }))
+        vi.spyOn(message, 'getBoundingClientRect').mockReturnValue(rect({ top: 60, bottom: 90 }))
+
+        const anchor = captureScrollAnchor(viewport)
+        expect(anchor).not.toBeNull()
+        expect(anchor?.id).toBe('hapi-message-11111111-2222-3333-4444-555555555555')
+        expect(anchor?.messageId).toBe('11111111-2222-3333-4444-555555555555')
 
         viewport.remove()
     })
@@ -211,10 +233,35 @@ describe('chat scroll persistence', () => {
             anchor: { id: 'message-7', topOffset: 18.4 }
         })
 
-        expect(readChatScrollPosition('session-a')).toEqual({
+        expect(readChatScrollPosition('session-a')).toMatchObject({
             scrollTop: 124,
             anchor: { id: 'message-7', topOffset: 18 }
         })
+    })
+
+    it('round-trips anchor messageId + capture timestamp for the locator target pick', () => {
+        localStorage.clear()
+        const before = Date.now()
+        writeChatScrollPosition('session-pos', {
+            scrollTop: 50,
+            anchor: { id: 'hapi-message-msg-9', topOffset: 10, messageId: 'msg-9' }
+        })
+        const after = Date.now()
+
+        const read = readChatScrollPosition('session-pos')
+        expect(read).not.toBeNull()
+        expect(read?.anchor?.messageId).toBe('msg-9')
+        expect(read?.capturedAt).toBeGreaterThanOrEqual(before)
+        expect(read?.capturedAt).toBeLessThanOrEqual(after)
+    })
+
+    it('clearChatScrollPosition drops the saved anchor', async () => {
+        const { clearChatScrollPosition } = await import('@/lib/chat-scroll-store')
+        localStorage.clear()
+        writeChatScrollPosition('session-clear', { scrollTop: 10, anchor: null })
+        expect(readChatScrollPosition('session-clear')).not.toBeNull()
+        clearChatScrollPosition('session-clear')
+        expect(readChatScrollPosition('session-clear')).toBeNull()
     })
 
     it('migrates the legacy session-scoped numeric position', () => {
@@ -230,7 +277,7 @@ describe('chat scroll persistence', () => {
         writeChatScrollPosition('remove', { scrollTop: 20, anchor: null })
 
         expect(gcChatScrollPositions(new Set(['keep']))).toBe(1)
-        expect(readChatScrollPosition('keep')).toEqual({ scrollTop: 10, anchor: null })
+        expect(readChatScrollPosition('keep')).toMatchObject({ scrollTop: 10, anchor: null })
         expect(readChatScrollPosition('remove')).toBeNull()
     })
 

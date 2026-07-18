@@ -141,6 +141,29 @@ function NewMessagesIndicator(props: { count: number; onClick: () => void }) {
     )
 }
 
+function LoadNewerIndicator(props: { loading: boolean; onClick: () => void }) {
+    const { t } = useTranslation()
+    return (
+        <button
+            onClick={props.onClick}
+            disabled={props.loading}
+            className="absolute bottom-32 left-1/2 -translate-x-1/2 bg-[var(--app-button)] text-[var(--app-button-text)] px-3 py-1.5 rounded-full text-sm font-medium shadow-lg animate-bounce-in z-10 disabled:opacity-60"
+        >
+            {props.loading ? (
+                <span className="inline-flex items-center gap-1.5">
+                    <Spinner size="sm" label={null} className="text-current" />
+                    {t('misc.loading')}
+                </span>
+            ) : (
+                <span className="inline-flex items-center gap-1">
+                    <span aria-hidden="true">&darr;</span>
+                    {t('misc.loadNewer')}
+                </span>
+            )}
+        </button>
+    )
+}
+
 function MessageSkeleton() {
     const { t } = useTranslation()
     const rows = [
@@ -288,6 +311,13 @@ export function HappyThread(props: {
     onOutlineItemClick?: (item: ConversationOutlineItem) => void
     findLatestUserMessageId: () => string | null
     sendScrollPreviousMessageId: string | null
+    /** Hub-side lastReadAt (from session detail / SSE), fed to the read-position
+     *  reporter as expectedLastReadAt for the LWW CAS (§4.5(f)). */
+    hubLastReadAt: number | null
+    /** Located window has messages beyond it — show a "load newer" affordance. */
+    hasNewer: boolean
+    /** Page forward from the located window toward the latest messages. */
+    onFetchNewer: () => Promise<void>
 }) {
     const { t } = useTranslation()
     const { terminalToolDisplayMode } = useTerminalToolDisplayMode()
@@ -304,7 +334,7 @@ export function HappyThread(props: {
             const anchor = captureScrollAnchor(viewport)
             return anchor?.messageId ?? null
         },
-        lastKnownHubReadAt: null
+        lastKnownHubReadAt: props.hubLastReadAt
     })
 
     const loadLockRef = useRef(false)
@@ -886,6 +916,12 @@ export function HappyThread(props: {
                     </div>
                 </ThreadPrimitive.Viewport>
                 <NewMessagesIndicator count={props.pendingCount} onClick={requestBottomScroll} />
+                {props.hasNewer ? (
+                    <LoadNewerIndicator
+                        loading={props.isLoadingMoreMessages}
+                        onClick={() => { void props.onFetchNewer() }}
+                    />
+                ) : null}
                 {props.outlineOpen ? (
                     <>
                         <button

@@ -28,6 +28,12 @@ export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Ho
         const before = parsed.data.beforeAt !== undefined && parsed.data.beforeSeq !== undefined
             ? { at: parsed.data.beforeAt, seq: parsed.data.beforeSeq }
             : null
+        const after = parsed.data.afterAt !== undefined && parsed.data.afterSeq !== undefined
+            ? { at: parsed.data.afterAt, seq: parsed.data.afterSeq }
+            : null
+        if (after) {
+            return c.json(engine.getMessagesAfterPage(sessionId, { limit, after }))
+        }
         return c.json(engine.getMessagesPage(sessionId, { limit, before }))
     })
 
