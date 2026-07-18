@@ -9,6 +9,7 @@ export type MessageWindowState = {
     pending: DecryptedMessage[]
     pendingCount: number
     hasMore: boolean
+    hasNewer: boolean
     oldestSeq: number | null
     newestSeq: number | null
     isLoading: boolean
@@ -34,6 +35,7 @@ type InternalState = MessageWindowState & {
     pendingOverflowVisibleCount: number
     latestGeneration: number
     olderGeneration: number
+    newerGeneration: number
     // V8 composite cursor: defined when hub responded with nextBeforeAt
     oldestPositionAt: number | null
     // Paired with oldestPositionAt — the server returns both as a cursor; keep them
@@ -41,6 +43,12 @@ type InternalState = MessageWindowState & {
     // a recomputed minimum `seq` from the local window (those can refer to
     // different rows after a low-seq message is invoked late).
     oldestPositionSeq: number | null
+    // Forward pagination cursor (newer-than-cursor). Set by fetchLocatedWindow
+    // (newerCursor) when the located window has messages beyond it, and advanced
+    // by fetchNewerMessages. hasNewer=false means the window already reaches the
+    // latest message.
+    newestPositionAt: number | null
+    newestPositionSeq: number | null
 }
 
 type PendingVisibilityCacheEntry = {
@@ -48,7 +56,7 @@ type PendingVisibilityCacheEntry = {
     visible: boolean
 }
 
-type AsyncGenerationKind = 'latest' | 'older'
+type AsyncGenerationKind = 'latest' | 'older' | 'newer'
 
 type PersistedMessageWindowState = {
     messages: DecryptedMessage[]
@@ -56,8 +64,11 @@ type PersistedMessageWindowState = {
     pendingOverflowCount: number
     pendingOverflowVisibleCount: number
     hasMore: boolean
+    hasNewer: boolean
     oldestPositionAt: number | null
     oldestPositionSeq: number | null
+    newestPositionAt: number | null
+    newestPositionSeq: number | null
     warning: string | null
     atBottom: boolean
 }
@@ -182,8 +193,11 @@ function persistState(sessionId: string, state: InternalState): void {
             pendingOverflowCount: state.pendingOverflowCount,
             pendingOverflowVisibleCount: state.pendingOverflowVisibleCount,
             hasMore: state.hasMore,
+            hasNewer: state.hasNewer,
             oldestPositionAt: state.oldestPositionAt,
             oldestPositionSeq: state.oldestPositionSeq,
+            newestPositionAt: state.newestPositionAt,
+            newestPositionSeq: state.newestPositionSeq,
             warning: state.warning,
             atBottom: state.atBottom,
         }
@@ -285,9 +299,12 @@ function createState(sessionId: string): InternalState {
         pendingVisibleCount: 0,
         pendingOverflowVisibleCount: 0,
         hasMore: false,
+        hasNewer: false,
         oldestSeq: null,
         oldestPositionAt: null,
         oldestPositionSeq: null,
+        newestPositionAt: null,
+        newestPositionSeq: null,
         newestSeq: null,
         isLoading: false,
         hasLoadedLatest: false,
@@ -298,6 +315,7 @@ function createState(sessionId: string): InternalState {
         pendingOverflowCount: 0,
         latestGeneration: 0,
         olderGeneration: 0,
+        newerGeneration: 0,
     }
 }
 
@@ -322,8 +340,11 @@ function hydrateState(sessionId: string): InternalState | null {
             pendingOverflowCount: typeof parsed.pendingOverflowCount === 'number' ? parsed.pendingOverflowCount : 0,
             pendingOverflowVisibleCount: typeof parsed.pendingOverflowVisibleCount === 'number' ? parsed.pendingOverflowVisibleCount : 0,
             hasMore: parsed.hasMore === true,
+            hasNewer: parsed.hasNewer === true,
             oldestPositionAt: toNullableNumber(parsed.oldestPositionAt),
             oldestPositionSeq: toNullableNumber(parsed.oldestPositionSeq),
+            newestPositionAt: toNullableNumber(parsed.newestPositionAt),
+            newestPositionSeq: toNullableNumber(parsed.newestPositionSeq),
             warning: typeof parsed.warning === 'string' ? parsed.warning : null,
             atBottom: parsed.atBottom !== false,
             hasLoadedLatest: true,
@@ -389,13 +410,15 @@ function beginAsyncGeneration(
 }
 
 function getGeneration(state: InternalState, kind: AsyncGenerationKind): number {
-    return kind === 'latest' ? state.latestGeneration : state.olderGeneration
+    if (kind === 'latest') return state.latestGeneration
+    if (kind === 'older') return state.olderGeneration
+    return state.newerGeneration
 }
 
 function setGeneration(state: InternalState, kind: AsyncGenerationKind, generation: number): InternalState {
-    return kind === 'latest'
-        ? { ...state, latestGeneration: generation }
-        : { ...state, olderGeneration: generation }
+    if (kind === 'latest') return { ...state, latestGeneration: generation }
+    if (kind === 'older') return { ...state, olderGeneration: generation }
+    return { ...state, newerGeneration: generation }
 }
 
 function isCurrentGeneration(sessionId: string, kind: AsyncGenerationKind, generation: number): boolean {
@@ -570,8 +593,11 @@ function buildState(
         pendingVisibleCount?: number
         pendingOverflowVisibleCount?: number
         hasMore?: boolean
+        hasNewer?: boolean
         oldestPositionAt?: number | null
         oldestPositionSeq?: number | null
+        newestPositionAt?: number | null
+        newestPositionSeq?: number | null
         isLoading?: boolean
         hasLoadedLatest?: boolean
         isLoadingMore?: boolean
@@ -606,8 +632,11 @@ function buildState(
         oldestSeq,
         oldestPositionAt: updates.oldestPositionAt !== undefined ? updates.oldestPositionAt : prev.oldestPositionAt,
         oldestPositionSeq: updates.oldestPositionSeq !== undefined ? updates.oldestPositionSeq : prev.oldestPositionSeq,
+        newestPositionAt: updates.newestPositionAt !== undefined ? updates.newestPositionAt : prev.newestPositionAt,
+        newestPositionSeq: updates.newestPositionSeq !== undefined ? updates.newestPositionSeq : prev.newestPositionSeq,
         newestSeq,
         hasMore: updates.hasMore !== undefined ? updates.hasMore : prev.hasMore,
+        hasNewer: updates.hasNewer !== undefined ? updates.hasNewer : prev.hasNewer,
         isLoading: updates.isLoading !== undefined ? updates.isLoading : prev.isLoading,
         hasLoadedLatest: updates.hasLoadedLatest !== undefined ? updates.hasLoadedLatest : prev.hasLoadedLatest,
         isLoadingMore: updates.isLoadingMore !== undefined ? updates.isLoadingMore : prev.isLoadingMore,
@@ -896,8 +925,11 @@ export async function fetchLatestMessages(api: ApiClient, sessionId: string): Pr
                     pendingVisibleCount: 0,
                     pendingOverflowVisibleCount: 0,
                     hasMore: response.page.hasMore,
+                    hasNewer: false,
                     oldestPositionAt: nextBeforeAt,
                     oldestPositionSeq: nextBeforeSeq,
+                    newestPositionAt: null,
+                    newestPositionSeq: null,
                     isLoading: false,
                     hasLoadedLatest: true,
                     warning: null,
@@ -914,6 +946,9 @@ export async function fetchLatestMessages(api: ApiClient, sessionId: string): Pr
                 // the next older-page load.
                 oldestPositionAt: nextBeforeAt,
                 oldestPositionSeq: nextBeforeSeq,
+                newestPositionAt: null,
+                newestPositionSeq: null,
+                hasNewer: false,
                 isLoading: false,
                 hasLoadedLatest: true,
                 warning: pendingResult.warning,
@@ -963,8 +998,11 @@ export async function fetchLocatedWindow(
                 pendingVisibleCount: 0,
                 pendingOverflowVisibleCount: 0,
                 hasMore: window.hasOlder,
+                hasNewer: window.hasNewer,
                 oldestPositionAt: window.olderCursor?.at ?? null,
                 oldestPositionSeq: window.olderCursor?.seq ?? null,
+                newestPositionAt: window.newerCursor?.at ?? null,
+                newestPositionSeq: window.newerCursor?.seq ?? null,
                 isLoading: false,
                 hasLoadedLatest: !window.hasNewer,
                 atBottom: !window.hasNewer,
@@ -1017,6 +1055,55 @@ export async function fetchOlderMessages(api: ApiClient, sessionId: string): Pro
         }
         const message = error instanceof Error ? error.message : 'Failed to load messages'
         updateStateForGeneration(sessionId, 'older', generation, (prev) => buildState(prev, { isLoadingMore: false, warning: message }))
+    }
+}
+
+/** Page forward (newer-than-cursor) from a located window toward the latest
+ *  messages. Used after fetchLocatedWindow when the window has messages beyond
+ *  it (hasNewer=true). Each call advances newestPosition; when the server reports
+ *  no more newer messages the window is flipped to atBottom + hasLoadedLatest. */
+export async function fetchNewerMessages(api: ApiClient, sessionId: string): Promise<void> {
+    const initial = getState(sessionId)
+    if (initial.isLoadingMore || !initial.hasNewer) {
+        return
+    }
+    if (initial.newestPositionAt === null || initial.newestPositionSeq === null) {
+        return
+    }
+    const generation = beginAsyncGeneration(sessionId, 'newer', { isLoadingMore: true })
+
+    try {
+        const response = await api.getMessages(sessionId, {
+            afterAt: initial.newestPositionAt,
+            afterSeq: initial.newestPositionSeq,
+            limit: PAGE_SIZE
+        })
+
+        const nextAfterAt = response.page.nextAfterAt ?? null
+        const nextAfterSeq = response.page.nextAfterSeq ?? null
+        const stillHasNewer = response.page.hasMore
+
+        updateStateForGeneration(sessionId, 'newer', generation, (prev) => {
+            const merged = mergeMessages(prev.messages, response.messages)
+            // Trim keeping the newest slice (append mode drops oldest) so the
+            // viewport follows the user forward toward the latest messages.
+            const trimmed = trimPreservingQueued(merged, OLDER_LOAD_WINDOW_SIZE, 'append').kept
+            return buildState(prev, {
+                messages: trimmed,
+                hasNewer: stillHasNewer,
+                newestPositionAt: nextAfterAt,
+                newestPositionSeq: nextAfterSeq,
+                isLoadingMore: false,
+                atBottom: !stillHasNewer ? true : prev.atBottom,
+                hasLoadedLatest: !stillHasNewer ? true : prev.hasLoadedLatest,
+            })
+        })
+    } catch (error) {
+        if (!isCurrentGeneration(sessionId, 'newer', generation)) {
+            return
+        }
+        const message = error instanceof Error ? error.message : 'Failed to load newer messages'
+        updateStateForGeneration(sessionId, 'newer', generation, (prev) => buildState(prev, { isLoadingMore: false, warning: message }))
     }
 }
 

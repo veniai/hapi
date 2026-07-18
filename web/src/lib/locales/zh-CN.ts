@@ -750,6 +750,7 @@ export default {
   'misc.variant': '变体',
   'misc.loading': '加载中…',
   'misc.loadOlder': '加载更早的',
+  'misc.loadNewer': '加载更新的',
   'misc.newMessage': '{n} 条新消息',
   'misc.pendingSessions': '待处理 {n} 个会话',
   'misc.loadingMessages': '加载消息中…',

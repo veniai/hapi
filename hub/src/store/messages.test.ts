@@ -348,3 +348,74 @@ describe('countFutureScheduledLocalMessages', () => {
         expect(nextAt.get(sessionB.id)).toBeUndefined()
     })
 })
+
+describe('getMessagesByPositionAfter', () => {
+    it('returns messages strictly after the cursor (ascending), empty when cursor at the end', () => {
+        const store = makeStore()
+        const session = makeSession(store, 'after-cursor')
+        const m1 = store.messages.addMessage(session.id, { role: 'user', content: { type: 'text', text: '1' } }, 'l1')
+        const m2 = store.messages.addMessage(session.id, { role: 'user', content: { type: 'text', text: '2' } }, 'l2')
+        const m3 = store.messages.addMessage(session.id, { role: 'user', content: { type: 'text', text: '3' } }, 'l3')
+
+        const pos = (m: typeof m1) => ({ at: (m.invokedAt ?? m.createdAt) as number, seq: m.seq as number })
+
+        expect(store.messages.getMessagesByPositionAfter(session.id, 50).map((m) => m.id)).toEqual([m1.id, m2.id, m3.id])
+        expect(store.messages.getMessagesByPositionAfter(session.id, 50, pos(m1)).map((m) => m.id)).toEqual([m2.id, m3.id])
+        expect(store.messages.getMessagesByPositionAfter(session.id, 50, pos(m2)).map((m) => m.id)).toEqual([m3.id])
+        expect(store.messages.getMessagesByPositionAfter(session.id, 50, pos(m3))).toEqual([])
+    })
+
+    it('clamps limit to the 1..200 band', () => {
+        const store = makeStore()
+        const session = makeSession(store, 'after-clamp')
+        store.messages.addMessage(session.id, { role: 'user', content: { type: 'text', text: '1' } }, 'l1')
+
+        // limit 0 / huge should not throw and should still return rows.
+        expect(store.messages.getMessagesByPositionAfter(session.id, 0).length).toBe(1)
+        expect(store.messages.getMessagesByPositionAfter(session.id, 99999).length).toBe(1)
+    })
+})
+
+describe('locateMessageWindow', () => {
+    it('locates the target with older + newer cursors and inclusive window', () => {
+        const store = makeStore()
+        const session = makeSession(store, 'locate')
+        const m1 = store.messages.addMessage(session.id, { role: 'user', content: { type: 'text', text: '1' } }, 'l1')
+        const m2 = store.messages.addMessage(session.id, { role: 'user', content: { type: 'text', text: '2' } }, 'l2')
+        const m3 = store.messages.addMessage(session.id, { role: 'user', content: { type: 'text', text: '3' } }, 'l3')
+
+        const win = store.messages.locateMessageWindow(session.id, m2.id, { beforeLimit: 1, afterLimit: 1 })
+        expect(win).not.toBeNull()
+        expect(win!.target).toEqual({ at: (m2.invokedAt ?? m2.createdAt) as number, seq: m2.seq as number })
+        expect(win!.messages.map((m) => m.id)).toEqual([m1.id, m2.id, m3.id])
+        expect(win!.olderCursor).not.toBeNull()
+        expect(win!.newerCursor).not.toBeNull()
+        expect(win!.hasOlder).toBe(false)
+        expect(win!.hasNewer).toBe(false)
+    })
+
+    it('returns null when the target message does not exist in the session', () => {
+        const store = makeStore()
+        const session = makeSession(store, 'locate-missing')
+        store.messages.addMessage(session.id, { role: 'user', content: { type: 'text', text: '1' } }, 'l1')
+
+        const win = store.messages.locateMessageWindow(session.id, 'nonexistent-id', { beforeLimit: 50, afterLimit: 50 })
+        expect(win).toBeNull()
+    })
+
+    it('reports hasOlder/hasNewer when more messages lie beyond the limits', () => {
+        const store = makeStore()
+        const session = makeSession(store, 'locate-bounds')
+        const msgs = Array.from({ length: 5 }, (_, i) =>
+            store.messages.addMessage(session.id, { role: 'user', content: { type: 'text', text: `${i}` } }, `l${i}`)
+        )
+        const mid = msgs[2]
+
+        const win = store.messages.locateMessageWindow(session.id, mid.id, { beforeLimit: 1, afterLimit: 1 })
+        expect(win).not.toBeNull()
+        expect(win!.hasOlder).toBe(true)
+        expect(win!.hasNewer).toBe(true)
+        // Window still centered on target: 1 older + target + 1 newer.
+        expect(win!.messages.map((m) => m.id)).toEqual([msgs[1].id, mid.id, msgs[3].id])
+    })
+})

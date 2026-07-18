@@ -214,6 +214,53 @@ export class MessageService {
         }
     }
 
+    /** Newer-than-cursor pagination (ascending) for fetchNewerMessages — loads
+     *  messages strictly after the given position cursor, returning a nextAfter
+     *  cursor + hasMore so the web can page forward from a located window toward
+     *  the latest messages without re-fetching the whole latest page. Mirrors
+     *  getMessagesPage but in the forward direction. See doc/spec/web-chat-read-position-sync.md §4.3. */
+    getMessagesAfterPage(
+        sessionId: string,
+        options: { limit: number; after?: { at: number; seq: number } | null }
+    ): {
+        messages: DecryptedMessage[]
+        page: {
+            limit: number
+            nextBeforeAt: number | null
+            nextBeforeSeq: number | null
+            nextAfterAt: number | null
+            nextAfterSeq: number | null
+            hasMore: boolean
+        }
+    } {
+        // Fetch limit+1 to detect hasMore without a second round-trip (same trick
+        // as locateMessageWindow's before/after+1).
+        const fetched = this.store.messages.getMessagesByPositionAfter(
+            sessionId,
+            options.limit + 1,
+            options.after ?? undefined
+        )
+        const hasMore = fetched.length > options.limit
+        const pageRows = hasMore ? fetched.slice(0, options.limit) : fetched
+        const messages = toVisibleDecryptedMessages(pageRows)
+        const newest = pageRows[pageRows.length - 1] ?? null
+        const nextAfterAt = newest ? (newest.invokedAt ?? newest.createdAt) : null
+        const nextAfterSeq = newest?.seq ?? null
+        return {
+            messages,
+            page: {
+                limit: options.limit,
+                // Backward-compat fields are nulled on forward pages; the web
+                // reads nextAfterAt/Seq for forward pagination.
+                nextBeforeAt: null,
+                nextBeforeSeq: null,
+                nextAfterAt,
+                nextAfterSeq,
+                hasMore
+            }
+        }
+    }
+
     /** CLI reconnect backfill — excludes future-scheduled rows so the runner does
      *  not consume them ahead of their scheduled_at.  See messages.ts:getDeliverableMessagesAfter. */
     getDeliverableMessagesAfter(sessionId: string, options: { afterSeq: number; limit: number; now: number }): DecryptedMessage[] {

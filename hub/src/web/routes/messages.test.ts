@@ -241,3 +241,108 @@ describe('POST /api/sessions/:id/messages — inactive session response shape', 
         expect(sentMessages).toHaveLength(0)
     })
 })
+
+// ---------------------------------------------------------------------------
+// GET /sessions/:id/messages/locate — locator window (§4.3)
+// ---------------------------------------------------------------------------
+
+function createLocateApp(locateImpl: (...args: unknown[]) => unknown) {
+    const engine = {
+        resolveSessionAccess: () => ({
+            ok: true,
+            sessionId: 'session-1',
+            session: { id: 'session-1', active: true }
+        }),
+        locateMessageWindow: locateImpl,
+    } as unknown as SyncEngine
+    const app = new Hono<WebAppEnv>()
+    app.use('*', async (c, next) => {
+        c.set('namespace', 'default')
+        await next()
+    })
+    app.route('/api', createMessagesRoutes(() => engine as SyncEngine))
+    return app
+}
+
+describe('GET /api/sessions/:id/messages/locate', () => {
+    const UUID = '11111111-1111-4111-8111-111111111111'
+
+    it('200 — returns the located window', async () => {
+        const window = {
+            messages: [],
+            target: { at: 1, seq: 1 },
+            olderCursor: null,
+            hasOlder: false,
+            newerCursor: null,
+            hasNewer: false
+        }
+        const app = createLocateApp(() => ({ type: 'success', window }))
+        const res = await app.request(`/api/sessions/abc/messages/locate?messageId=${UUID}`)
+        expect(res.status).toBe(200)
+        const body = await res.json()
+        expect(body.target).toEqual({ at: 1, seq: 1 })
+    })
+
+    it('404 — message not found in session', async () => {
+        const app = createLocateApp(() => ({ type: 'not-found' }))
+        const res = await app.request(`/api/sessions/abc/messages/locate?messageId=${UUID}`)
+        expect(res.status).toBe(404)
+    })
+
+    it('400 — non-uuid messageId rejected by Zod', async () => {
+        const app = createLocateApp(() => ({ type: 'success', window: {} }))
+        const res = await app.request('/api/sessions/abc/messages/locate?messageId=not-a-uuid')
+        expect(res.status).toBe(400)
+    })
+})
+
+// ---------------------------------------------------------------------------
+// GET /sessions/:id/messages — afterAt/afterSeq forward pagination (§4.3)
+// ---------------------------------------------------------------------------
+
+describe('GET /api/sessions/:id/messages — afterAt/afterSeq forward pagination', () => {
+    function createAfterApp(getAfterImpl: (...args: unknown[]) => unknown) {
+        const engine = {
+            resolveSessionAccess: () => ({
+                ok: true,
+                sessionId: 'session-1',
+                session: { id: 'session-1', active: true }
+            }),
+            getMessagesAfterPage: getAfterImpl,
+            getMessagesPage: () => ({
+                messages: [],
+                page: { limit: 50, nextBeforeAt: null, nextBeforeSeq: null, hasMore: false }
+            }),
+        } as unknown as SyncEngine
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createMessagesRoutes(() => engine as SyncEngine))
+        return app
+    }
+
+    it('forwards afterAt/afterSeq to getMessagesAfterPage', async () => {
+        let captured: unknown = null
+        const app = createAfterApp((_sid: unknown, opts: unknown) => {
+            captured = opts
+            return {
+                messages: [],
+                page: { limit: 50, nextBeforeAt: null, nextBeforeSeq: null, nextAfterAt: null, nextAfterSeq: null, hasMore: false }
+            }
+        })
+        const res = await app.request('/api/sessions/abc/messages?afterAt=1000&afterSeq=5&limit=50')
+        expect(res.status).toBe(200)
+        expect(captured).toEqual({ limit: 50, after: { at: 1000, seq: 5 } })
+    })
+
+    it('400 — afterAt without afterSeq rejected by Zod refine', async () => {
+        const app = createAfterApp(() => ({
+            messages: [],
+            page: { limit: 50, nextBeforeAt: null, nextBeforeSeq: null, nextAfterAt: null, nextAfterSeq: null, hasMore: false }
+        }))
+        const res = await app.request('/api/sessions/abc/messages?afterAt=1000')
+        expect(res.status).toBe(400)
+    })
+})

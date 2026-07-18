@@ -40,7 +40,7 @@ import { queryKeys } from '@/lib/query-keys'
 import { useToast } from '@/lib/toast-context'
 import { useTranslation } from '@/lib/use-translation'
 import { fetchLatestMessages, gcMessageWindows, seedMessageWindowFromSession } from '@/lib/message-window-store'
-import { gcChatScrollPositions } from '@/lib/chat-scroll-store'
+import { gcChatScrollPositions, readChatScrollPosition } from '@/lib/chat-scroll-store'
 import { clearDraftsAfterSend } from '@/lib/clearDraftsAfterSend'
 import { inactiveSessionCanResume } from '@/lib/sessionResume'
 import { markSessionSeen } from '@/lib/sessionLastSeen'
@@ -667,7 +667,38 @@ function SessionPage() {
         messagesVersion,
         flushPending,
         setAtBottom,
+        loadInitial,
+        hasNewer: messagesHasNewer,
+        fetchNewer: fetchNewerMessages,
     } = useMessages(api, sessionId)
+
+    // Session-entry load: pick the read-position target via LWW (saved local
+    // anchor vs hub lastRead) and locate the window on it, so a previously-read
+    // session lands back at the last-read message instead of jumping to the
+    // top. Driven here (not inside useMessages) because the hub read position
+    // arrives with the session detail. The ref guards each session to a single
+    // initial load — SSE-driven session object changes must not re-trigger it.
+    const initialLoadRef = useRef<Set<string>>(new Set())
+    useEffect(() => {
+        if (!api || !sessionId) return
+        if (initialLoadRef.current.has(sessionId)) return
+        // Wait for session detail (carries the hub read position). If the
+        // detail load errored, proceed with the local saved anchor only.
+        if (!session && !sessionError) return
+        initialLoadRef.current.add(sessionId)
+        const saved = readChatScrollPosition(sessionId)
+        const savedMessageId = saved?.anchor?.messageId ?? null
+        const savedAt = saved?.capturedAt ?? 0
+        const hubMessageId = session?.lastReadMessageId ?? null
+        const hubAt = session?.lastReadAt ?? 0
+        let target: string | null
+        if (savedMessageId && hubMessageId) {
+            target = savedAt >= hubAt ? savedMessageId : hubMessageId
+        } else {
+            target = savedMessageId ?? hubMessageId
+        }
+        void loadInitial(target)
+    }, [api, sessionId, session, sessionError, loadInitial])
 
     // Tracks the most recent send the hub rejected (4xx/5xx/network), keyed
     // by the session the failed POST actually targeted (post-resolveSessionId).
@@ -968,6 +999,8 @@ function SessionPage() {
             onSend={sendMessage}
             onFlushPending={flushPending}
             onAtBottomChange={setAtBottom}
+            onFetchNewer={fetchNewerMessages}
+            hasNewerMessages={messagesHasNewer}
             onRetryMessage={retryMessage}
             autocompleteSuggestions={getAutocompleteSuggestions}
             availableSlashCommands={slashCommands}

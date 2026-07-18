@@ -81,6 +81,10 @@ export type MessagesResponse = {
         limit: number
         nextBeforeSeq: number | null
         nextBeforeAt: number | null
+        // Present on forward (after-cursor) pages from getMessagesAfterPage;
+        // absent on backward (before-cursor) pages.
+        nextAfterSeq?: number | null
+        nextAfterAt?: number | null
         hasMore: boolean
     }
 }
@@ -226,9 +230,19 @@ export const MessagesQuerySchema = z.object({
     limit: z.coerce.number().int().min(1).max(200).optional(),
     beforeSeq: z.coerce.number().int().min(1).optional(),
     beforeAt: z.coerce.number().int().min(0).optional(),
+    // Forward pagination (newer-than-cursor) for fetchNewerMessages. Paged in
+    // the ascending direction from a located window toward the latest messages.
+    afterSeq: z.coerce.number().int().min(0).optional(),
+    afterAt: z.coerce.number().int().min(0).optional(),
 }).refine((data) => (data.beforeAt === undefined) === (data.beforeSeq === undefined), {
     message: 'beforeAt and beforeSeq must be provided together',
     path: ['beforeAt'],
+}).refine((data) => (data.afterAt === undefined) === (data.afterSeq === undefined), {
+    message: 'afterAt and afterSeq must be provided together',
+    path: ['afterAt'],
+}).refine((data) => !(data.beforeAt !== undefined && data.afterAt !== undefined), {
+    message: 'before and after cursors are mutually exclusive',
+    path: ['afterAt'],
 })
 
 export type MessagesQuery = z.infer<typeof MessagesQuerySchema>

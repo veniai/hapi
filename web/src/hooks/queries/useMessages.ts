@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useSyncExternalStore } from 'react'
+import { useCallback, useSyncExternalStore } from 'react'
 import type { ApiClient } from '@/api/client'
 import type { DecryptedMessage } from '@/types/api'
 import {
     fetchLatestMessages,
+    fetchLocatedWindow,
+    fetchNewerMessages,
     fetchOlderMessages,
     flushPendingMessages,
     getMessageWindowState,
@@ -10,6 +12,7 @@ import {
     subscribeMessageWindow,
     type MessageWindowState,
 } from '@/lib/message-window-store'
+import { clearChatScrollPosition } from '@/lib/chat-scroll-store'
 
 export const EMPTY_STATE: MessageWindowState = {
     sessionId: 'unknown',
@@ -17,6 +20,7 @@ export const EMPTY_STATE: MessageWindowState = {
     pending: [],
     pendingCount: 0,
     hasMore: false,
+    hasNewer: false,
     oldestSeq: null,
     newestSeq: null,
     isLoading: false,
@@ -41,6 +45,17 @@ export function useMessages(api: ApiClient | null, sessionId: string | null): {
     refetch: () => Promise<unknown>
     flushPending: () => Promise<void>
     setAtBottom: (atBottom: boolean) => void
+    /** True when the located window has messages beyond it (hasNewer) — the
+     *  thread surfaces a "load newer" affordance that calls fetchNewer. */
+    hasNewer: boolean
+    /** Page forward from a located window toward the latest messages. */
+    fetchNewer: () => Promise<void>
+    /** Session-entry load. target != null → locate the window on that message
+     *  (saved/hub read position); target == null → load latest (bottom). On
+     *  locator not-found (target message gone) the saved anchor is cleared and
+     *  we fall back to latest. Driven by SessionPage, not an auto effect, so
+     *  the target can be picked from saved LWW hub read position. */
+    loadInitial: (targetMessageId: string | null) => Promise<void>
 } {
     const state = useSyncExternalStore(
         useCallback((listener) => {
@@ -58,11 +73,23 @@ export function useMessages(api: ApiClient | null, sessionId: string | null): {
         () => EMPTY_STATE
     )
 
-    useEffect(() => {
-        if (!api || !sessionId) {
+    // No auto-fetch effect here: SessionPage drives the initial load via
+    // loadInitial so it can locate the window on the saved/hub read position
+    // instead of always landing at the bottom.
+
+    const loadInitial = useCallback(async (targetMessageId: string | null) => {
+        if (!api || !sessionId) return
+        if (targetMessageId) {
+            const result = await fetchLocatedWindow(api, sessionId, targetMessageId)
+            if (!result.ok && result.reason === 'not-found') {
+                // Target vanished (deleted / cross-device race). Drop the stale
+                // saved anchor and fall back to a plain latest load.
+                clearChatScrollPosition(sessionId)
+                await fetchLatestMessages(api, sessionId)
+            }
             return
         }
-        void fetchLatestMessages(api, sessionId)
+        await fetchLatestMessages(api, sessionId)
     }, [api, sessionId])
 
     const loadMore = useCallback(async () => {
@@ -89,6 +116,11 @@ export function useMessages(api: ApiClient | null, sessionId: string | null): {
         setMessageWindowAtBottom(sessionId, atBottom)
     }, [sessionId])
 
+    const fetchNewer = useCallback(async () => {
+        if (!api || !sessionId) return
+        await fetchNewerMessages(api, sessionId)
+    }, [api, sessionId])
+
     return {
         messages: state.messages,
         pendingMessages: state.pending,
@@ -103,5 +135,8 @@ export function useMessages(api: ApiClient | null, sessionId: string | null): {
         refetch,
         flushPending,
         setAtBottom,
+        loadInitial,
+        hasNewer: state.hasNewer,
+        fetchNewer,
     }
 }
