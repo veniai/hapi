@@ -11,6 +11,7 @@ import { HappySystemMessage } from '@/components/AssistantChat/messages/SystemMe
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/Spinner'
 import { useTerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
+import { useReadPositionReporter } from '@/hooks/useReadPositionReporter'
 import { useTranslation } from '@/lib/use-translation'
 import { CloseIcon } from '@/components/icons'
 import {
@@ -292,6 +293,20 @@ export function HappyThread(props: {
     const { terminalToolDisplayMode } = useTerminalToolDisplayMode()
     const viewportRef = useRef<HTMLDivElement | null>(null)
     const contentRef = useRef<HTMLDivElement | null>(null)
+
+    // Report last-read position to hub (pagehide/visibility/switch, low-frequency)
+    useReadPositionReporter({
+        api: props.api,
+        sessionId: props.sessionId,
+        getAnchorMessageId: () => {
+            const viewport = viewportRef.current
+            if (!viewport) return null
+            const anchor = captureScrollAnchor(viewport)
+            return anchor?.messageId ?? null
+        },
+        lastKnownHubReadAt: null
+    })
+
     const loadLockRef = useRef(false)
     const pendingScrollRef = useRef<PendingScrollRestore | null>(null)
     const prevLoadingMoreRef = useRef(false)
