@@ -292,3 +292,58 @@ describe('GET /api/sessions/:id/messages — afterAt/afterSeq forward pagination
         expect(res.status).toBe(400)
     })
 })
+describe('POST /api/sessions/:id/messages/queued-state', () => {
+    it('deduplicates local IDs, forwards the session, and works for inactive sessions', async () => {
+        const { app, queuedStateCalls } = createApp({ active: false })
+
+        const response = await app.request('/api/sessions/session-1/messages/queued-state', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+                localIds: ['queued-2', 'missing-1', 'queued-2', 'invoked-1', 'queued-1']
+            })
+        })
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({
+            queuedLocalIds: ['queued-2', 'queued-1'],
+            invokedLocalMessages: [{ localId: 'invoked-1', invokedAt: 1_000 }]
+        })
+        expect(queuedStateCalls).toEqual([{
+            sessionId: 'session-1',
+            localIds: ['queued-2', 'missing-1', 'invoked-1', 'queued-1']
+        }])
+    })
+
+    it('accepts an empty candidate list as a no-op', async () => {
+        const { app, queuedStateCalls } = createApp({})
+
+        const response = await app.request('/api/sessions/session-1/messages/queued-state', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ localIds: [] })
+        })
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ queuedLocalIds: [], invokedLocalMessages: [] })
+        expect(queuedStateCalls).toHaveLength(0)
+    })
+
+    it.each([
+        ['an empty local ID', { localIds: [''] }],
+        ['a non-array localIds value', { localIds: 'queued-1' }],
+        ['more than 1000 local IDs', { localIds: Array.from({ length: 1001 }, (_, i) => `local-${i}`) }]
+    ])('rejects %s', async (_label, body) => {
+        const { app, queuedStateCalls } = createApp({})
+
+        const response = await app.request('/api/sessions/session-1/messages/queued-state', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(body)
+        })
+
+        expect(response.status).toBe(400)
+        expect(await response.json()).toMatchObject({ error: 'Invalid body' })
+        expect(queuedStateCalls).toHaveLength(0)
+    })
+})
