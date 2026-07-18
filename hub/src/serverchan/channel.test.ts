@@ -97,4 +97,41 @@ describe('ServerChanChannel', () => {
             globalThis.fetch = originalFetch
         }
     })
+
+    it('suppresses all send* when web tab is visible', async () => {
+        const fetchMock = mock(async () => new Response('ok', { status: 200 }))
+        const originalFetch = globalThis.fetch
+        globalThis.fetch = fetchMock as unknown as typeof fetch
+        try {
+            const channel = new ServerChanChannel(
+                'SCT_TEST',
+                'https://hapi.example.com',
+                { hasVisibleConnection: () => true } as never
+            )
+            await channel.sendReady(createSession())
+            await channel.sendPermissionRequest(createSession())
+            await channel.sendTaskNotification(createSession(), { status: 'failed', summary: 'boom' })
+            await channel.sendSessionCompletion(createSession(), 'completed' as SessionEndReason)
+            expect(fetchMock).not.toHaveBeenCalled()
+        } finally {
+            globalThis.fetch = originalFetch
+        }
+    })
+
+    it('sends normally when web tab is not visible', async () => {
+        const fetchMock = mock(async () => new Response('ok', { status: 200 }))
+        const originalFetch = globalThis.fetch
+        globalThis.fetch = fetchMock as unknown as typeof fetch
+        try {
+            const channel = new ServerChanChannel(
+                'SCT_TEST',
+                'https://hapi.example.com',
+                { hasVisibleConnection: () => false } as never
+            )
+            await channel.sendReady(createSession())
+            expect(fetchMock).toHaveBeenCalledTimes(1)
+        } finally {
+            globalThis.fetch = originalFetch
+        }
+    })
 })

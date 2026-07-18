@@ -2,6 +2,7 @@ import type { Session } from '../sync/syncEngine'
 import type { SessionEndReason } from '@hapi/protocol'
 import type { NotificationChannel, TaskNotification } from '../notifications/notificationTypes'
 import { getAgentName, getSessionName } from '../notifications/sessionInfo'
+import type { VisibilityTracker } from '../visibility/visibilityTracker'
 
 function buildSessionUrl(baseUrl: string, sessionId: string): string {
     try {
@@ -15,11 +16,15 @@ function buildSessionUrl(baseUrl: string, sessionId: string): string {
 export class ServerChanChannel implements NotificationChannel {
     constructor(
         private readonly sendKey: string,
-        private readonly publicUrl: string
+        private readonly publicUrl: string,
+        private readonly visibilityTracker?: VisibilityTracker
     ) {}
 
     async sendReady(session: Session): Promise<void> {
         if (!session.active) {
+            return
+        }
+        if (this.visibilityTracker?.hasVisibleConnection(session.namespace)) {
             return
         }
 
@@ -31,6 +36,9 @@ export class ServerChanChannel implements NotificationChannel {
 
     async sendPermissionRequest(session: Session): Promise<void> {
         if (!session.active) {
+            return
+        }
+        if (this.visibilityTracker?.hasVisibleConnection(session.namespace)) {
             return
         }
 
@@ -47,6 +55,9 @@ export class ServerChanChannel implements NotificationChannel {
         if (!session.active) {
             return
         }
+        if (this.visibilityTracker?.hasVisibleConnection(session.namespace)) {
+            return
+        }
 
         const agentName = getAgentName(session)
         const name = getSessionName(session)
@@ -60,6 +71,9 @@ export class ServerChanChannel implements NotificationChannel {
     }
 
     async sendSessionCompletion(session: Session, _reason: SessionEndReason): Promise<void> {
+        if (this.visibilityTracker?.hasVisibleConnection(session.namespace)) {
+            return
+        }
         const agentName = getAgentName(session)
         const name = getSessionName(session)
         const url = buildSessionUrl(this.publicUrl, session.id)
