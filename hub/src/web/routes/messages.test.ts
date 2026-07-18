@@ -279,7 +279,7 @@ describe('GET /api/sessions/:id/messages/locate', () => {
         const app = createLocateApp(() => ({ type: 'success', window }))
         const res = await app.request(`/api/sessions/abc/messages/locate?messageId=${UUID}`)
         expect(res.status).toBe(200)
-        const body = await res.json()
+        const body = await res.json() as { target: { at: number; seq: number } }
         expect(body.target).toEqual({ at: 1, seq: 1 })
     })
 
