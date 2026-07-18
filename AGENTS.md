@@ -1,3 +1,45 @@
+<!-- cortex-managed:project:0.1.0 -->
+<!-- Edit .cortex/project.md, then run cortex init. -->
+
+# Cortex Project Source
+
+This file is the editable source for the generated project `AGENTS.md`. Edit this file, then run `cortex init`.
+
+## Project Facts
+
+- **What:** HAPI — local-first platform for running AI coding agents (Claude Code, Codex, Cursor, Grok, Gemini, OpenCode) with remote control via web/phone. CLI wraps agents → hub (HTTP + Socket.IO + SSE + Telegram bot, SQLite persistence) → web PWA.
+- **Layout:** Bun workspaces. `cli/` (binary, agent wrappers, runner daemon) · `hub/` (API + sockets + SSE) · `web/` (React PWA) · `shared/` (types/schemas, consumed by all three) · `docs/` (VitePress) · `website/`. Path alias `@/*` → `./src/*` per package.
+- **Sources of truth:** root + package `README.md`; `shared/src/{types,schemas,socket,messages,modes}.ts`; the full pre-takeover guide is retained verbatim in Imported Instructions below.
+- **Engineering rules:** no backward compatibility (break old formats freely); pragmatism over overengineering; write necessary tests only; TypeScript strict, no untyped code; prefer 4-space indentation; Zod for runtime validation (`shared/src/schemas.ts`).
+- **Key patterns:** RPC — CLI registers handlers (`rpc-register`), hub routes via `rpcGateway.ts`; versioned updates (CLI sends version, hub rejects stale); session modes `local`/`remote` (switchable mid-session); permission modes `default`/`acceptEdits`/`auto`/`bypassPermissions`/`plan`; multi-user isolation via `CLI_API_TOKEN:<namespace>` suffix.
+- **Data flow:** CLI spawns agent → Socket.IO → hub (DB + SSE broadcast) → web; user actions reverse via REST → RPC → CLI → agent.
+- **Schema changes (hub SQLite):** versioned migrations in `hub/src/store/index.ts`, driven by `user_version` pragma, `SCHEMA_VERSION` is target. Never edit schema without a migration step — hub throws `buildSchemaMismatchError`. Full procedure in Imported Instructions.
+
+## Native Verification
+
+- **Commands (run from repo root):**
+  - `bun typecheck` — all packages
+  - `bun run test` — all packages (cli + hub + web + shared), Vitest
+  - `bun run test:e2e` — Playwright e2e
+- **Source/purpose:** matches `.github/workflows/test.yml`; this is the pre-push mechanical gate. Test files `*.test.ts(x)` live next to source.
+- **Build artifacts:** `bun run build:web` (web dist, deploy step for web), `bun run build:single-exe` (all-in-one binary).
+
+## Permission Envelope
+
+- **Allowed without additional approval:** local code edits on `work/current`; side-effect-free local checks (typecheck, tests, lint) in a trusted workspace.
+- **Requires approval:** anything reaching **live**. Live = systemd user services (`hapi-hub`, `hapi-web`, `hapi-runner`) running the `deploy` branch from worktree `/home/claw/deploy/hapi`; public via Cloudflare at `hapi.zhetengde.xyz`.
+- **Change → live flow:**
+  1. Develop on `work/current`; verify `bun typecheck && bun run test`.
+  2. Move to deploy: `cd /home/claw/deploy/hapi && git merge --ff-only work/current` (or `git cherry-pick <sha>`). `--ff-only` keeps deploy a clean mirror — refuses on divergence (fix on `work/current` first), never produces merge commits.
+  3. Apply by scope: web → `bun run build:web` then restart `hapi-web`; hub → restart `hapi-hub`; cli → restart `hapi-runner`; shared → restart all three. (hub/cli run source — no build.)
+  4. Restarting `hapi-hub`/`hapi-runner` interrupts running agent sessions.
+  5. Verify at `hapi.zhetengde.xyz` (or `localhost:3006` / `:5173`).
+- **Forbidden:** committing directly on `deploy`; any merge commit on `deploy` (use `--ff-only` only); running `bun run dev` while prod occupies ports 3006/5173 (stop prod first or use alt port).
+
+## Imported Instructions Pending Reconciliation
+
+Full pre-takeover `AGENTS.md`, retained verbatim. Gradually fold into the structured sections above and prune duplicates as facts are confirmed by the human.
+
 # AGENTS.md
 
 Output style (commits/notes/summaries): telegraph; noun-phrases ok; drop grammar.
@@ -203,3 +245,9 @@ Rules:
 2. Unsure: read more code; if still stuck, ask w/ short options.
 3. Conflicts: call out; pick safer path.
 4. Unrecognized changes: assume other agent; keep going; focus your changes. If it causes issues, stop + ask user.
+
+## Cortex Task Protocol
+
+- Use the installed `cortex` skill for configuration reconciliation, Goal Contracts, or permission-boundary decisions.
+- Prefer declared project-native verification. Local side-effect-free checks may run directly in a trusted workspace.
+- A Goal cannot expand its own permission envelope. Stop and request a revised contract before new external or irreversible actions.
