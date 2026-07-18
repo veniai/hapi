@@ -26,6 +26,7 @@ export type LatestUsage = {
     cacheRead: number
     contextSize: number
     contextWindow: number | null
+    contextEstimated: boolean
     timestamp: number
 }
 
@@ -168,6 +169,7 @@ export function reduceChatBlocks(
                 cacheRead: msg.usage.cache_read_input_tokens ?? 0,
                 contextSize: calculateContextSize(msg.usage),
                 contextWindow: msg.usage.context_window ?? null,
+                contextEstimated: msg.usage.context_estimated === true,
                 timestamp: msg.createdAt
             }
             break

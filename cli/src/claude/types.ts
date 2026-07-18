@@ -12,6 +12,7 @@ export const UsageSchema = z.object({
   cache_read_input_tokens: z.number().int().nonnegative().optional(),
   context_tokens: z.number().int().nonnegative().optional(),
   context_window: z.number().int().positive().optional(),
+  context_estimated: z.boolean().optional(),
   output_tokens: z.number().int().nonnegative(),
   service_tier: z.string().optional(),
 });

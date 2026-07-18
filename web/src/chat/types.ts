@@ -8,6 +8,7 @@ export type UsageData = {
     cache_read_input_tokens?: number
     context_tokens?: number
     context_window?: number
+    context_estimated?: boolean
     thread_id?: string
     scope_role?: string
     service_tier?: string

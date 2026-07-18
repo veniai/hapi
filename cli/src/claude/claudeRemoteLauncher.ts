@@ -252,13 +252,16 @@ class ClaudeRemoteLauncher extends RemoteLauncherBase {
                 messageQueue.enqueue(logMessage);
             }
 
-            // 修复A：result 到达时追加一条 usage 载体（空 content + 真实 usage），让 web
-            // 端 ctx 读数非 0。必须在 if(logMessage) 块外——convert(result) 返回 null、块
-            // 内不触发；convert(result) 已先把 modelUsage 的真实 contextWindow 刷新进缓存，
-            // buildUsageCarrier 此处能读到。subtype 非 success 或无 usage 不发。
+            // GLM 的 assistant usage 是 {0,0} 占位，只能用 result 累计值生成估算载体。
+            // 原生 Claude 已有逐请求 usage，不能让平均值载体覆盖它。此逻辑必须位于
+            // if(logMessage) 外，因为 convert(result) 返回 null。
             if (message.type === 'result') {
                 const resultMessage = message as SDKResultMessage
-                if (resultMessage.subtype === 'success' && resultMessage.usage) {
+                if (
+                    resultMessage.subtype === 'success'
+                    && resultMessage.usage
+                    && sdkToLogConverter.needsResultUsageCarrier()
+                ) {
                     messageQueue.enqueue(sdkToLogConverter.buildUsageCarrier(resultMessage.usage, resultMessage.num_turns))
                 }
             }

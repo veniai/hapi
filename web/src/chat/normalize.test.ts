@@ -380,7 +380,8 @@ describe('normalizeDecryptedMessage', () => {
                             output_tokens: 34,
                             cache_read_input_tokens: 6_101,
                             context_tokens: 19_902,
-                            context_window: 1_000_000
+                            context_window: 1_000_000,
+                            context_estimated: true
                         }
                     }
                 }
@@ -394,7 +395,8 @@ describe('normalizeDecryptedMessage', () => {
                 input_tokens: 13_801,
                 cache_read_input_tokens: 6_101,
                 context_tokens: 19_902,
-                context_window: 1_000_000
+                context_window: 1_000_000,
+                context_estimated: true
             }
         })
     })

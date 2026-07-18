@@ -1453,6 +1453,7 @@ function SessionChatInner(props: SessionChatProps) {
                         contextSize={reduced.latestUsage?.contextSize}
                         contextCacheRead={reduced.latestUsage?.cacheRead}
                         contextWindow={reduced.latestUsage?.contextWindow ?? piContextWindow}
+                        contextEstimated={reduced.latestUsage?.contextEstimated}
                         controlledByUser={controlledByUser}
                         onCollaborationModeChange={
                             codexCollaborationModeSupported && props.session.active && !controlledByUser

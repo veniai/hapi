@@ -150,6 +150,7 @@ export function HappyComposer(props: {
     contextSize?: number
     contextCacheRead?: number
     contextWindow?: number | null
+    contextEstimated?: boolean
     controlledByUser?: boolean
     agentFlavor?: string | null
     availableModelOptions?: Array<{ value: string | null; label: string }>
@@ -221,6 +222,7 @@ export function HappyComposer(props: {
         contextSize,
         contextCacheRead,
         contextWindow,
+        contextEstimated,
         controlledByUser = false,
         agentFlavor,
         availableModelOptions,
@@ -1265,6 +1267,7 @@ export function HappyComposer(props: {
                             contextSize={contextSize}
                             contextCacheRead={contextCacheRead}
                             contextWindow={contextWindow}
+                            contextEstimated={contextEstimated}
                             model={model}
                             modelReasoningEffort={modelReasoningEffort}
                             serviceTier={serviceTier}
