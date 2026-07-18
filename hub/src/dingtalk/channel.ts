@@ -3,6 +3,7 @@ import type { SessionEndReason } from '@hapi/protocol'
 import type { Session } from '../sync/syncEngine'
 import type { NotificationChannel, TaskNotification } from '../notifications/notificationTypes'
 import { getSessionName } from '../notifications/sessionInfo'
+import type { VisibilityTracker } from '../visibility/visibilityTracker'
 
 /**
  * 钉钉通知渠道（L2.1，简化版）。按 hub notification event 发钉钉机器人消息，
@@ -20,16 +21,19 @@ export class DingtalkChannel implements NotificationChannel {
         private readonly webhook: string,
         private readonly secret?: string,
         private readonly keyword?: string,
-        private readonly publicUrl?: string
+        private readonly publicUrl?: string,
+        private readonly visibilityTracker?: VisibilityTracker
     ) {}
 
     async sendReady(session: Session): Promise<void> {
         if (!session.active) return
+        if (this.visibilityTracker?.hasVisibleConnection(session.namespace)) return
         await this.send(`${getSessionName(session)}·空闲`, session.id)
     }
 
     async sendPermissionRequest(session: Session): Promise<void> {
         if (!session.active) return
+        if (this.visibilityTracker?.hasVisibleConnection(session.namespace)) return
         const request = session.agentState?.requests
             ? Object.values(session.agentState.requests).sort(
                 (a, b) => (a.createdAt ?? Number.MAX_SAFE_INTEGER) - (b.createdAt ?? Number.MAX_SAFE_INTEGER)
@@ -41,6 +45,7 @@ export class DingtalkChannel implements NotificationChannel {
 
     async sendTaskNotification(session: Session, notification: TaskNotification): Promise<void> {
         if (!session.active) return
+        if (this.visibilityTracker?.hasVisibleConnection(session.namespace)) return
         const status = notification.status?.trim().toLowerCase()
         const isFailure = status === 'failed' || status === 'error' || status === 'killed' || status === 'aborted'
         const label = isFailure ? '失败' : '完成'
@@ -49,6 +54,7 @@ export class DingtalkChannel implements NotificationChannel {
     }
 
     async sendSessionCompletion(session: Session, _reason: SessionEndReason): Promise<void> {
+        if (this.visibilityTracker?.hasVisibleConnection(session.namespace)) return
         await this.send(`${getSessionName(session)}·完成`, session.id)
     }
 

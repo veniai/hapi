@@ -37,18 +37,22 @@ describe('DingtalkChannel', () => {
         globalThis.fetch = originalFetch
     })
 
-    function makeChannel(opts: { secret?: string; keyword?: string; publicUrl?: string } = {}): DingtalkChannel {
+    function makeChannel(opts: { secret?: string; keyword?: string; publicUrl?: string; visible?: boolean } = {}): DingtalkChannel {
         fetchMock.mockResolvedValue({
             ok: true,
             status: 200,
             text: async () => JSON.stringify({ errcode: 0, errmsg: 'ok' })
         })
         globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch
+        const tracker = opts.visible === undefined
+            ? undefined
+            : ({ hasVisibleConnection: () => opts.visible } as never)
         return new DingtalkChannel(
             'https://oapi.dingtalk.com/robot/send?access_token=x',
             opts.secret,
             opts.keyword,
-            opts.publicUrl
+            opts.publicUrl,
+            tracker
         )
     }
 
@@ -146,5 +150,22 @@ describe('DingtalkChannel', () => {
         fetchMock.mockResolvedValueOnce({ ok: true, status: 200, text: async () => '<html>proxy error</html>' })
 
         await expect(ch.sendReady(makeSession())).rejects.toThrow('钉钉发送失败: 响应不是有效 JSON')
+    })
+
+    it('web tab 可见时抑制所有 send*(ready/permission/task/completion)', async () => {
+        const ch = makeChannel({ visible: true })
+        await ch.sendReady(makeSession())
+        await ch.sendPermissionRequest(makeSession({
+            agentState: { requests: { r1: { tool: 'Bash', arguments: {}, createdAt: 0 } } } as any
+        }))
+        await ch.sendTaskNotification(makeSession(), { summary: 'boom', status: 'failed' })
+        await ch.sendSessionCompletion(makeSession(), 'completed' as any)
+        expect(fetchMock).not.toHaveBeenCalled()
+    })
+
+    it('web tab 不可见时正常发送', async () => {
+        const ch = makeChannel({ visible: false })
+        await ch.sendReady(makeSession())
+        expect(fetchMock).toHaveBeenCalledTimes(1)
     })
 })

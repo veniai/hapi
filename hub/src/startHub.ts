@@ -202,7 +202,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     ]
 
     if (config.serverChanSendKey && config.serverChanNotification) {
-        notificationChannels.push(new ServerChanChannel(config.serverChanSendKey, config.publicUrl))
+        notificationChannels.push(new ServerChanChannel(config.serverChanSendKey, config.publicUrl, visibilityTracker))
     }
 
     // 钉钉机器人（L2.1）
@@ -211,7 +211,8 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
             config.dingtalkWebhook,
             config.dingtalkSecret ?? undefined,
             config.dingtalkKeyword ?? undefined,
-            config.publicUrl
+            config.publicUrl,
+            visibilityTracker
         ))
         console.log(`[Hub] Dingtalk: enabled (keyword:${config.dingtalkKeyword ? 'set' : 'none'}, sign:${config.dingtalkSecret ? 'on' : 'off'})`)
     } else {
@@ -224,7 +225,8 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
             syncEngine,
             botToken: config.telegramBotToken,
             publicUrl: config.publicUrl,
-            store
+            store,
+            visibilityTracker
         })
         // Only add to notification channels if notifications are enabled
         if (config.telegramNotification) {

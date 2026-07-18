@@ -12,6 +12,7 @@ import { formatReadyNotification, formatSessionNotification, createNotificationK
 import { getAgentName } from '../notifications/sessionInfo'
 import type { NotificationChannel, TaskNotification } from '../notifications/notificationTypes'
 import type { Store } from '../store'
+import type { VisibilityTracker } from '../visibility/visibilityTracker'
 
 export interface BotContext extends Context {
     // Extended context for future use
@@ -22,6 +23,7 @@ export interface HappyBotConfig {
     botToken: string
     publicUrl: string
     store: Store
+    visibilityTracker?: VisibilityTracker
 }
 
 /**
@@ -33,11 +35,13 @@ export class HappyBot implements NotificationChannel {
     private isRunning = false
     private readonly publicUrl: string
     private readonly store: Store
+    private readonly visibilityTracker?: VisibilityTracker
 
     constructor(config: HappyBotConfig) {
         this.syncEngine = config.syncEngine
         this.publicUrl = config.publicUrl
         this.store = config.store
+        this.visibilityTracker = config.visibilityTracker
 
         this.bot = new Bot<BotContext>(config.botToken)
         this.setupMiddleware()
@@ -213,6 +217,9 @@ export class HappyBot implements NotificationChannel {
         if (!session.active) {
             return
         }
+        if (this.visibilityTracker?.hasVisibleConnection(session.namespace)) {
+            return
+        }
 
         const text = formatReadyNotification(session, this.getSessionMachine(session))
         const url = buildMiniAppDeepLink(this.publicUrl, `session_${session.id}`)
@@ -244,6 +251,9 @@ export class HappyBot implements NotificationChannel {
         if (!session.active) {
             return
         }
+        if (this.visibilityTracker?.hasVisibleConnection(session.namespace)) {
+            return
+        }
 
         const text = formatSessionNotification(session, this.getSessionMachine(session))
         const keyboard = createNotificationKeyboard(session, this.publicUrl)
@@ -266,6 +276,9 @@ export class HappyBot implements NotificationChannel {
 
     async sendTaskNotification(session: Session, notification: TaskNotification): Promise<void> {
         if (!session.active) {
+            return
+        }
+        if (this.visibilityTracker?.hasVisibleConnection(session.namespace)) {
             return
         }
 
