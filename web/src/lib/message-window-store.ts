@@ -1,4 +1,4 @@
-import type { ApiClient } from '@/api/client'
+import { ApiError, type ApiClient } from '@/api/client'
 import type { DecryptedMessage, MessageStatus, MessagesResponse } from '@/types/api'
 import { normalizeDecryptedMessage } from '@/chat/normalize'
 import { isQueuedForInvocation, isUserMessage, mergeMessages } from '@/lib/messages'
@@ -36,6 +36,11 @@ type InternalState = MessageWindowState & {
     latestGeneration: number
     olderGeneration: number
     newerGeneration: number
+    // Window epoch: bumped by every replacement (clear/seed/fetchLatest/
+    // fetchLocated). Pagination (fetchOlder/fetchNewer) captures the epoch at
+    // start and refuses to commit if a replacement invalidated it — prevents a
+    // slow pagination response from overwriting a freshly-replaced window.
+    windowEpoch: number
     // V8 composite cursor: defined when hub responded with nextBeforeAt
     oldestPositionAt: number | null
     // Paired with oldestPositionAt — the server returns both as a cursor; keep them
@@ -316,6 +321,7 @@ function createState(sessionId: string): InternalState {
         latestGeneration: 0,
         olderGeneration: 0,
         newerGeneration: 0,
+        windowEpoch: 0,
     }
 }
 
@@ -409,6 +415,25 @@ function beginAsyncGeneration(
     return generation
 }
 
+/** A replacement (latest/locator) rewrites the whole window. Bump the epoch so
+ *  any in-flight older/newer pagination — which captured the prior epoch —
+ *  fails its commit check and discards its stale response. Also bumps the
+ *  given direction generation (replacement vs same-direction replacement). */
+function beginReplacementGeneration(
+    sessionId: string,
+    kind: AsyncGenerationKind,
+    updates: Parameters<typeof buildState>[1]
+): { generation: number; epoch: number } {
+    let generation = 0
+    let epoch = 0
+    updateState(sessionId, (prev) => {
+        generation = getGeneration(prev, kind) + 1
+        epoch = prev.windowEpoch + 1
+        return setGeneration({ ...buildState(prev, updates), windowEpoch: epoch }, kind, generation)
+    })
+    return { generation, epoch }
+}
+
 function getGeneration(state: InternalState, kind: AsyncGenerationKind): number {
     if (kind === 'latest') return state.latestGeneration
     if (kind === 'older') return state.olderGeneration
@@ -434,6 +459,29 @@ function updateStateForGeneration(
 ): void {
     updateState(sessionId, (prev) => {
         if (getGeneration(prev, kind) !== generation) {
+            return prev
+        }
+        return updater(prev)
+    }, immediate)
+}
+
+/** Pagination commit guard: applies the update only if BOTH the direction
+ *  generation and the window epoch still match what was captured at fetch
+ *  start. A replacement (latest/locator/clear/seed) bumps the epoch, so any
+ *  pagination response that returns after a replacement is dropped. */
+function updateStateForEpochGeneration(
+    sessionId: string,
+    kind: AsyncGenerationKind,
+    generation: number,
+    epoch: number,
+    updater: (prev: InternalState) => InternalState,
+    immediate?: boolean
+): void {
+    updateState(sessionId, (prev) => {
+        if (getGeneration(prev, kind) !== generation) {
+            return prev
+        }
+        if (prev.windowEpoch !== epoch) {
             return prev
         }
         return updater(prev)
@@ -477,6 +525,25 @@ function deriveOldestPosition(messages: DecryptedMessage[]): { at: number; seq: 
     }
     return oldest && typeof oldest.seq === 'number'
         ? { at: getMessagePositionAt(oldest), seq: oldest.seq }
+        : null
+}
+
+function deriveNewestPosition(messages: DecryptedMessage[]): { at: number; seq: number } | null {
+    let newest: DecryptedMessage | null = null
+    for (const message of messages) {
+        if (typeof message.seq !== 'number') continue
+        if (!newest) {
+            newest = message
+            continue
+        }
+        const messageAt = getMessagePositionAt(message)
+        const newestAt = getMessagePositionAt(newest)
+        if (messageAt > newestAt || (messageAt === newestAt && message.seq > newest.seq!)) {
+            newest = message
+        }
+    }
+    return newest && typeof newest.seq === 'number'
+        ? { at: getMessagePositionAt(newest), seq: newest.seq }
         : null
 }
 
@@ -706,6 +773,31 @@ function cursorUpdatesAfterAppendTrim(
     }
 }
 
+/** Mirror of cursorUpdatesAfterAppendTrim for the prepend (older-page) direction:
+ *  when backward pagination trims the newest slice, surface that there ARE
+ *  newer messages beyond the window and re-anchor newestPosition so a later
+ *  fetchNewer pages from the right place instead of a stale cursor. */
+function cursorUpdatesAfterPrependTrim(
+    kept: DecryptedMessage[],
+    dropped: DecryptedMessage[]
+): {
+    hasNewer?: boolean
+    newestPositionAt?: number | null
+    newestPositionSeq?: number | null
+} {
+    if (dropped.length === 0) {
+        return {}
+    }
+    const newest = deriveNewestPosition(kept)
+    return {
+        hasNewer: true,
+        ...(newest ? {
+            newestPositionAt: newest.at,
+            newestPositionSeq: newest.seq
+        } : {})
+    }
+}
+
 function trimPending(
     sessionId: string,
     messages: DecryptedMessage[]
@@ -854,6 +946,8 @@ export function clearMessageWindow(sessionId: string): void {
         ...createState(sessionId),
         latestGeneration: previous.latestGeneration + 1,
         olderGeneration: previous.olderGeneration + 1,
+        newerGeneration: previous.newerGeneration + 1,
+        windowEpoch: previous.windowEpoch + 1,
     }, true)
 }
 
@@ -869,17 +963,25 @@ export function seedMessageWindowFromSession(fromSessionId: string, toSessionId:
         pendingOverflowCount: source.pendingOverflowCount,
         pendingOverflowVisibleCount: source.pendingOverflowVisibleCount,
         hasMore: source.hasMore,
+        hasNewer: source.hasNewer,
         oldestPositionAt: source.oldestPositionAt,
         oldestPositionSeq: source.oldestPositionSeq,
+        newestPositionAt: source.newestPositionAt,
+        newestPositionSeq: source.newestPositionSeq,
         warning: source.warning,
         atBottom: source.atBottom,
         isLoading: false,
         isLoadingMore: false,
     })
+    // Bump the destination epoch so any in-flight pagination on the destination
+    // is invalidated; copy forward cursors + all three generations from source.
+    const destPrev = getState(toSessionId)
     setState(toSessionId, {
         ...next,
         latestGeneration: source.latestGeneration,
         olderGeneration: source.olderGeneration,
+        newerGeneration: source.newerGeneration,
+        windowEpoch: destPrev.windowEpoch + 1,
     })
 }
 
@@ -893,7 +995,13 @@ export async function fetchLatestMessages(api: ApiClient, sessionId: string): Pr
     // a concurrent message-received SSE must not be filtered against the older
     // response snapshot that predates it.
     const reconcileCandidateIds = queuedReconcileCandidateIds(initial.messages, initial.pending)
-    const generation = beginAsyncGeneration(sessionId, 'latest', { isLoading: true, warning: null })
+    // atBottom=true rewrites the visible window (replacement → bump epoch,
+    // invalidating in-flight older/newer pagination). atBottom=false only merges
+    // the latest page into pending — NOT a replacement, so a pagination request
+    // already in flight may still legitimately commit.
+    const generation = initial.atBottom
+        ? beginReplacementGeneration(sessionId, 'latest', { isLoading: true, warning: null }).generation
+        : beginAsyncGeneration(sessionId, 'latest', { isLoading: true, warning: null })
 
     try {
         const firstResponse = await api.getMessages(sessionId, { limit: PAGE_SIZE })
@@ -972,12 +1080,15 @@ export async function fetchLocatedWindow(
     sessionId: string,
     targetMessageId: string,
     options?: { beforeLimit?: number; afterLimit?: number }
-): Promise<{ ok: true } | { ok: false; reason: 'not-found' }> {
+): Promise<{ ok: true } | { ok: false; reason: 'not-found' | 'busy' | 'failed' }> {
     const initial = getState(sessionId)
     if (initial.isLoading) {
-        return { ok: false, reason: 'not-found' }
+        // In-flight latest load (e.g. concurrent SSE-reconnect fetchLatest). Do
+        // NOT treat as not-found — that would wipe the saved anchor. Caller
+        // leaves saved alone and lets the existing load finish.
+        return { ok: false, reason: 'busy' }
     }
-    const generation = beginAsyncGeneration(sessionId, 'latest', { isLoading: true, warning: null })
+    const { generation } = beginReplacementGeneration(sessionId, 'latest', { isLoading: true, warning: null })
     try {
         const window = await api.locateMessageWindow(sessionId, targetMessageId, options) as {
             messages: typeof initial.messages
@@ -1010,11 +1121,17 @@ export async function fetchLocatedWindow(
             })
         })
         return { ok: true }
-    } catch {
+    } catch (error) {
+        if (!isCurrentGeneration(sessionId, 'latest', generation)) {
+            return { ok: true }
+        }
+        // Only a real HTTP 404 means the target is gone → caller may clear saved.
+        // Network blips / 5xx / anything else must NOT clear the saved anchor.
+        const isNotFound = error instanceof ApiError && error.status === 404
         updateStateForGeneration(sessionId, 'latest', generation, (prev) =>
-            buildState(prev, { isLoading: false, warning: 'Failed to locate' })
+            buildState(prev, { isLoading: false, warning: isNotFound ? null : 'Failed to locate' })
         )
-        return { ok: false, reason: 'not-found' }
+        return { ok: false, reason: isNotFound ? 'not-found' : 'failed' }
     }
 }
 
@@ -1026,6 +1143,7 @@ export async function fetchOlderMessages(api: ApiClient, sessionId: string): Pro
     if (initial.oldestPositionAt === null || initial.oldestPositionSeq === null) {
         return
     }
+    const epoch = initial.windowEpoch
     const generation = beginAsyncGeneration(sessionId, 'older', { isLoadingMore: true })
 
     try {
@@ -1038,11 +1156,12 @@ export async function fetchOlderMessages(api: ApiClient, sessionId: string): Pro
         const nextBeforeAt = response.page.nextBeforeAt
         const nextBeforeSeq = response.page.nextBeforeSeq
 
-        updateStateForGeneration(sessionId, 'older', generation, (prev) => {
+        updateStateForEpochGeneration(sessionId, 'older', generation, epoch, (prev) => {
             const merged = mergeMessages(response.messages, prev.messages)
-            const trimmed = trimPreservingQueued(merged, OLDER_LOAD_WINDOW_SIZE, 'prepend').kept
+            const { kept: trimmed, dropped } = trimPreservingQueued(merged, OLDER_LOAD_WINDOW_SIZE, 'prepend')
             return buildState(prev, {
                 messages: trimmed,
+                ...cursorUpdatesAfterPrependTrim(trimmed, dropped),
                 hasMore: response.page.hasMore,
                 oldestPositionAt: nextBeforeAt,
                 oldestPositionSeq: nextBeforeSeq,
@@ -1054,7 +1173,7 @@ export async function fetchOlderMessages(api: ApiClient, sessionId: string): Pro
             return
         }
         const message = error instanceof Error ? error.message : 'Failed to load messages'
-        updateStateForGeneration(sessionId, 'older', generation, (prev) => buildState(prev, { isLoadingMore: false, warning: message }))
+        updateStateForEpochGeneration(sessionId, 'older', generation, epoch, (prev) => buildState(prev, { isLoadingMore: false, warning: message }))
     }
 }
 
@@ -1070,6 +1189,7 @@ export async function fetchNewerMessages(api: ApiClient, sessionId: string): Pro
     if (initial.newestPositionAt === null || initial.newestPositionSeq === null) {
         return
     }
+    const epoch = initial.windowEpoch
     const generation = beginAsyncGeneration(sessionId, 'newer', { isLoadingMore: true })
 
     try {
@@ -1083,13 +1203,14 @@ export async function fetchNewerMessages(api: ApiClient, sessionId: string): Pro
         const nextAfterSeq = response.page.nextAfterSeq ?? null
         const stillHasNewer = response.page.hasMore
 
-        updateStateForGeneration(sessionId, 'newer', generation, (prev) => {
+        updateStateForEpochGeneration(sessionId, 'newer', generation, epoch, (prev) => {
             const merged = mergeMessages(prev.messages, response.messages)
             // Trim keeping the newest slice (append mode drops oldest) so the
             // viewport follows the user forward toward the latest messages.
-            const trimmed = trimPreservingQueued(merged, OLDER_LOAD_WINDOW_SIZE, 'append').kept
+            const { kept: trimmed, dropped } = trimPreservingQueued(merged, OLDER_LOAD_WINDOW_SIZE, 'append')
             return buildState(prev, {
                 messages: trimmed,
+                ...cursorUpdatesAfterAppendTrim(trimmed, dropped),
                 hasNewer: stillHasNewer,
                 newestPositionAt: nextAfterAt,
                 newestPositionSeq: nextAfterSeq,
@@ -1103,7 +1224,7 @@ export async function fetchNewerMessages(api: ApiClient, sessionId: string): Pro
             return
         }
         const message = error instanceof Error ? error.message : 'Failed to load newer messages'
-        updateStateForGeneration(sessionId, 'newer', generation, (prev) => buildState(prev, { isLoadingMore: false, warning: message }))
+        updateStateForEpochGeneration(sessionId, 'newer', generation, epoch, (prev) => buildState(prev, { isLoadingMore: false, warning: message }))
     }
 }
 

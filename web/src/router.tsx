@@ -672,20 +672,27 @@ function SessionPage() {
         fetchNewer: fetchNewerMessages,
     } = useMessages(api, sessionId)
 
+    // LWW target for §4.3 initial positioning — fed to HappyThread so the
+    // viewport lands on it (saved/hub read position) instead of top/bottom.
+    const [locatorTarget, setLocatorTarget] = useState<string | null>(null)
+
     // Session-entry load: pick the read-position target via LWW (saved local
     // anchor vs hub lastRead) and locate the window on it, so a previously-read
     // session lands back at the last-read message instead of jumping to the
     // top. Driven here (not inside useMessages) because the hub read position
     // arrives with the session detail. The ref guards each session to a single
     // initial load — SSE-driven session object changes must not re-trigger it.
-    const initialLoadRef = useRef<Set<string>>(new Set())
+    // Track the last session we initial-loaded (single value, NOT a component-
+    // lifetime Set). A→B→A re-runs LWW for A on revisit, so a hub read position
+    // advanced on another device while away is picked up instead of ignored.
+    const lastLoadedRef = useRef<string | null>(null)
     useEffect(() => {
         if (!api || !sessionId) return
-        if (initialLoadRef.current.has(sessionId)) return
+        if (lastLoadedRef.current === sessionId) return
         // Wait for session detail (carries the hub read position). If the
         // detail load errored, proceed with the local saved anchor only.
         if (!session && !sessionError) return
-        initialLoadRef.current.add(sessionId)
+        lastLoadedRef.current = sessionId
         const saved = readChatScrollPosition(sessionId)
         const savedMessageId = saved?.anchor?.messageId ?? null
         const savedAt = saved?.capturedAt ?? 0
@@ -697,6 +704,7 @@ function SessionPage() {
         } else {
             target = savedMessageId ?? hubMessageId
         }
+        setLocatorTarget(target)
         void loadInitial(target)
     }, [api, sessionId, session, sessionError, loadInitial])
 
@@ -1001,6 +1009,7 @@ function SessionPage() {
             onAtBottomChange={setAtBottom}
             onFetchNewer={fetchNewerMessages}
             hasNewerMessages={messagesHasNewer}
+            locatorTargetMessageId={locatorTarget}
             onRetryMessage={retryMessage}
             autocompleteSuggestions={getAutocompleteSuggestions}
             availableSlashCommands={slashCommands}

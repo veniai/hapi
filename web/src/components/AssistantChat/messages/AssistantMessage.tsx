@@ -59,6 +59,7 @@ export function HappyAssistantMessage() {
     return (
         <MessagePrimitive.Root
             id={getConversationMessageAnchorId(messageId)}
+            data-hapi-role="agent"
             className={`happy-message ${rootClass} scroll-mt-4`}
         >
             {isCliOutput

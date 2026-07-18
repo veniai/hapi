@@ -25,13 +25,24 @@ export function useReadPositionReporter({
     sessionIdRef.current = sessionId
     const lastKnownRef = useRef(lastKnownHubReadAt)
     lastKnownRef.current = lastKnownHubReadAt
+    // Stable observedAt per messageId (§4.5(a)): reusing the same timestamp for
+    // the same message avoids refreshing the hub revision on every flush, which
+    // could overwrite a genuinely newer remote position.
+    const lastAnchorRef = useRef<{ messageId: string; observedAt: number } | null>(null)
 
     const flush = (sid: string) => {
         const messageId = getAnchorMessageId()
         if (!messageId) return
+        let observedAt: number
+        if (lastAnchorRef.current?.messageId === messageId) {
+            observedAt = lastAnchorRef.current.observedAt
+        } else {
+            observedAt = Date.now()
+            lastAnchorRef.current = { messageId, observedAt }
+        }
         const body = {
             messageId,
-            observedAt: Date.now(),
+            observedAt,
             expectedLastReadAt: lastKnownRef.current
         }
         const url = `/api/sessions/${encodeURIComponent(sid)}/read-position`
@@ -42,7 +53,20 @@ export function useReadPositionReporter({
                 headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
                 body: JSON.stringify(body),
                 keepalive: true
-            }).catch(() => { /* non-critical */ })
+            })
+                .then((resp) => resp.json())
+                .then((data: { ok?: boolean; updatedAt?: number; stale?: boolean; currentUpdatedAt?: number | null }) => {
+                    // Advance the local CAS revision with the hub's authoritative
+                    // updatedAt so the next report carries it (breaks stale-write
+                    // loops). Best-effort: on pagehide the page may unload before
+                    // the response arrives — that's fine, lastKnownRef just stays.
+                    if (typeof data.updatedAt === 'number') {
+                        lastKnownRef.current = data.updatedAt
+                    } else if (data.stale && typeof data.currentUpdatedAt === 'number') {
+                        lastKnownRef.current = data.currentUpdatedAt
+                    }
+                })
+                .catch(() => { /* non-critical */ })
         } catch {
             /* non-critical */
         }
