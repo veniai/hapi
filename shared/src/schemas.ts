@@ -229,8 +229,8 @@ export const SessionSchema = z.object({
     serviceTier: z.string().nullable().optional().default(null),
     permissionMode: PermissionModeSchema.optional(),
     collaborationMode: CodexCollaborationModeSchema.optional(),
-    lastReadMessageId: z.string().nullable().default(null),
-    lastReadAt: z.number().nullable().default(null)
+    lastReadMessageId: z.string().nullable().optional(),
+    lastReadAt: z.number().nullable().optional()
 })
 
 export type Session = z.infer<typeof SessionSchema>
