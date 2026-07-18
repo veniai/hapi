@@ -6,6 +6,7 @@ import { useAppContext } from '@/lib/app-context'
 import { classifySessionAttention } from '@/lib/sessionAttention'
 import { useSessionLastSeenVersion } from '@/hooks/useSessionLastSeen'
 import { getSessionLastSeenStore } from '@/lib/sessionLastSeen'
+import { useTranslation } from '@/lib/use-translation'
 
 // 浮窗计入的 attention 种类：需要用户行动的三类。background（后台任务）不计入。
 const PENDING_KINDS = new Set(['permission', 'input', 'unread'])
@@ -42,6 +43,7 @@ export function getPendingInboxSessions(
  * 与改动四钉钉同语义（需要处理就提示）；列表未读（L1.2 时间红）是另一条独立通道。
  */
 export function PendingInboxFab() {
+    const { t } = useTranslation()
     const { api } = useAppContext()
     const { sessions } = useSessions(api)
     const navigate = useNavigate()
@@ -72,7 +74,7 @@ export function PendingInboxFab() {
         <button
             type="button"
             onClick={handleClick}
-            aria-label={`待处理 ${pendingSessions.length} 个会话`}
+            aria-label={t('misc.pendingSessions', { n: pendingSessions.length })}
             className="fixed z-40 flex h-12 w-12 items-center justify-center rounded-full bg-[var(--app-accent,red)] text-base font-semibold text-white shadow-lg"
             style={{
                 bottom: 'calc(5.5rem + var(--app-floating-bottom-offset, 0px) + env(safe-area-inset-bottom))',

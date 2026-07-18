@@ -6,6 +6,7 @@ import { queryKeys } from '@/lib/query-keys'
 export function useSessions(api: ApiClient | null): {
     sessions: SessionSummary[]
     isLoading: boolean
+    isSuccess: boolean
     error: string | null
     refetch: () => Promise<unknown>
 } {
@@ -23,6 +24,7 @@ export function useSessions(api: ApiClient | null): {
     return {
         sessions: query.data?.sessions ?? [],
         isLoading: query.isLoading,
+        isSuccess: query.isSuccess,
         error: query.error instanceof Error ? query.error.message : query.error ? 'Failed to load sessions' : null,
         refetch: query.refetch,
     }

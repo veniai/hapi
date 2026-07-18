@@ -244,6 +244,7 @@ describe('message-window-store async generations', () => {
         }
 
         const staleLoad = fetchLatestMessages(api as unknown as ApiClient, SESSION_ID)
+        expect(getMessageWindowState(SESSION_ID).hasLoadedLatest).toBe(false)
         clearMessageWindow(SESSION_ID)
         await fetchLatestMessages(api as unknown as ApiClient, SESSION_ID)
 
@@ -252,6 +253,7 @@ describe('message-window-store async generations', () => {
 
         const state = getMessageWindowState(SESSION_ID)
         expect(state.warning).toBeNull()
+        expect(state.hasLoadedLatest).toBe(true)
         expect(state.messages.map((message) => message.id)).toEqual(['fresh-message'])
     })
 

@@ -31,7 +31,9 @@ export class DingtalkChannel implements NotificationChannel {
     async sendPermissionRequest(session: Session): Promise<void> {
         if (!session.active) return
         const request = session.agentState?.requests
-            ? Object.values(session.agentState.requests)[0]
+            ? Object.values(session.agentState.requests).sort(
+                (a, b) => (a.createdAt ?? Number.MAX_SAFE_INTEGER) - (b.createdAt ?? Number.MAX_SAFE_INTEGER)
+            )[0]
             : null
         const tool = request?.tool ? ` ${request.tool}` : ''
         await this.send(`${getSessionName(session)}·待审批${tool}`, session.id)
@@ -82,9 +84,25 @@ export class DingtalkChannel implements NotificationChannel {
             })
         })
 
+        const responseText = await response.text().catch(() => '')
         if (!response.ok) {
-            const errText = await response.text().catch(() => '')
+            const errText = responseText
             throw new Error(`钉钉发送失败: HTTP ${response.status} ${response.statusText}${errText ? ` - ${errText}` : ''}`)
+        }
+        let payload: { errcode?: unknown; errmsg?: unknown }
+        try {
+            payload = JSON.parse(responseText) as { errcode?: unknown; errmsg?: unknown }
+        } catch {
+            throw new Error('钉钉发送失败: 响应不是有效 JSON')
+        }
+        if (typeof payload.errcode !== 'number') {
+            throw new Error('钉钉发送失败: 响应缺少 errcode')
+        }
+        if (payload.errcode !== 0) {
+            const detail = typeof payload.errmsg === 'string' && payload.errmsg
+                ? ` ${payload.errmsg}`
+                : ''
+            throw new Error(`钉钉发送失败: errcode ${payload.errcode}${detail}`)
         }
     }
 }

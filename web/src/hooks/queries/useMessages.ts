@@ -20,6 +20,7 @@ export const EMPTY_STATE: MessageWindowState = {
     oldestSeq: null,
     newestSeq: null,
     isLoading: false,
+    hasLoadedLatest: false,
     isLoadingMore: false,
     warning: null,
     atBottom: true,
@@ -31,6 +32,7 @@ export function useMessages(api: ApiClient | null, sessionId: string | null): {
     pendingMessages: DecryptedMessage[]
     warning: string | null
     isLoading: boolean
+    hasLoadedLatest: boolean
     isLoadingMore: boolean
     hasMore: boolean
     pendingCount: number
@@ -92,6 +94,7 @@ export function useMessages(api: ApiClient | null, sessionId: string | null): {
         pendingMessages: state.pending,
         warning: state.warning,
         isLoading: state.isLoading,
+        hasLoadedLatest: state.hasLoadedLatest,
         isLoadingMore: state.isLoadingMore,
         hasMore: state.hasMore,
         pendingCount: state.pendingCount,

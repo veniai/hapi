@@ -446,6 +446,7 @@ type SessionChatProps = {
     messagesWarning: string | null
     hasMoreMessages: boolean
     isLoadingMessages: boolean
+    hasLoadedMessages: boolean
     isLoadingMoreMessages: boolean
     isSending: boolean
     pendingCount: number
@@ -1342,6 +1343,7 @@ function SessionChatInner(props: SessionChatProps) {
                         onFlushPending={props.onFlushPending}
                         onAtBottomChange={props.onAtBottomChange}
                         isLoadingMessages={props.isLoadingMessages}
+                        hasLoadedMessages={props.hasLoadedMessages}
                         messagesWarning={props.messagesWarning}
                         hasMoreMessages={props.hasMoreMessages}
                         isLoadingMoreMessages={props.isLoadingMoreMessages}

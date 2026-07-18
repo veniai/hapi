@@ -7,11 +7,14 @@ import {
     captureScrollAnchor,
     getScrollIntent,
     locateOutlineTargetMessage,
-    readChatScrollPosition,
     resolveSavedScrollPosition,
     restoreScrollAnchor,
-    writeChatScrollPosition,
 } from '@/components/AssistantChat/HappyThread'
+import {
+    gcChatScrollPositions,
+    readChatScrollPosition,
+    writeChatScrollPosition
+} from '@/lib/chat-scroll-store'
 import type { ConversationOutlineItem } from '@/chat/outline'
 
 const outlineItems: ConversationOutlineItem[] = [
@@ -201,12 +204,34 @@ describe('outline target loading', () => {
 })
 
 describe('chat scroll persistence', () => {
-    it('stores a non-negative integer position per session', () => {
-        writeChatScrollPosition('session-a', 123.6)
-        writeChatScrollPosition('session-b', -20)
+    it('stores a durable message anchor and rounded fallback position per session', () => {
+        localStorage.clear()
+        writeChatScrollPosition('session-a', {
+            scrollTop: 123.6,
+            anchor: { id: 'message-7', topOffset: 18.4 }
+        })
 
-        expect(readChatScrollPosition('session-a')).toBe(124)
-        expect(readChatScrollPosition('session-b')).toBe(0)
+        expect(readChatScrollPosition('session-a')).toEqual({
+            scrollTop: 124,
+            anchor: { id: 'message-7', topOffset: 18 }
+        })
+    })
+
+    it('migrates the legacy session-scoped numeric position', () => {
+        localStorage.clear()
+        sessionStorage.setItem('hapi.chat-scroll.v1.legacy', '321')
+
+        expect(readChatScrollPosition('legacy')).toEqual({ scrollTop: 321, anchor: null })
+    })
+
+    it('garbage-collects durable positions only for deleted sessions', () => {
+        localStorage.clear()
+        writeChatScrollPosition('keep', { scrollTop: 10, anchor: null })
+        writeChatScrollPosition('remove', { scrollTop: 20, anchor: null })
+
+        expect(gcChatScrollPositions(new Set(['keep']))).toBe(1)
+        expect(readChatScrollPosition('keep')).toEqual({ scrollTop: 10, anchor: null })
+        expect(readChatScrollPosition('remove')).toBeNull()
     })
 
     it('keeps the original target pending while async content is too short', () => {

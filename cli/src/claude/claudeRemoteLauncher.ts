@@ -257,11 +257,7 @@ class ClaudeRemoteLauncher extends RemoteLauncherBase {
             // if(logMessage) 外，因为 convert(result) 返回 null。
             if (message.type === 'result') {
                 const resultMessage = message as SDKResultMessage
-                if (
-                    resultMessage.subtype === 'success'
-                    && resultMessage.usage
-                    && sdkToLogConverter.needsResultUsageCarrier()
-                ) {
+                if (shouldBuildResultUsageCarrier(resultMessage, sdkToLogConverter.needsResultUsageCarrier())) {
                     messageQueue.enqueue(sdkToLogConverter.buildUsageCarrier(resultMessage.usage, resultMessage.num_turns))
                 }
             }
@@ -458,4 +454,10 @@ class ClaudeRemoteLauncher extends RemoteLauncherBase {
 export async function claudeRemoteLauncher(session: Session): Promise<'switch' | 'exit'> {
     const launcher = new ClaudeRemoteLauncher(session);
     return launcher.launch();
+}
+export function shouldBuildResultUsageCarrier(
+    message: SDKResultMessage,
+    needsCarrier: boolean
+): message is SDKResultMessage & { usage: NonNullable<SDKResultMessage['usage']> } {
+    return Boolean(message.usage) && needsCarrier
 }
