@@ -3,6 +3,7 @@ export type PersistedChatScrollPosition = {
     anchor: {
         id: string
         topOffset: number
+        messageId?: string
     } | null
 }
 

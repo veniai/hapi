@@ -290,6 +290,54 @@ export class SyncEngine {
         return this.sessionCache.resolveSessionAccess(sessionId, namespace)
     }
 
+    getSessionReadPosition(
+        sessionId: string,
+        namespace: string
+    ): { messageId: string | null; observedAt: number | null } | undefined {
+        const access = this.sessionCache.resolveSessionAccess(sessionId, namespace)
+        if (!access.ok) return undefined
+        return {
+            messageId: access.session.lastReadMessageId ?? null,
+            observedAt: access.session.lastReadAt ?? null
+        }
+    }
+
+    updateSessionReadPosition(
+        sessionId: string,
+        namespace: string,
+        messageId: string,
+        observedAt: number,
+        expectedLastReadAt: number | null
+    ): { result: 'success'; updatedAt: number } | { result: 'stale' } | { result: 'not-found' } {
+        const access = this.sessionCache.resolveSessionAccess(sessionId, namespace)
+        if (!access.ok) return { result: 'not-found' }
+        const result = this.store.sessions.setSessionReadPosition(
+            sessionId, namespace, messageId, observedAt, expectedLastReadAt
+        )
+        if (result.result !== 'success') return result.result === 'not-found' ? { result: 'not-found' } : { result: 'stale' }
+        this.sessionCache.refreshSession(sessionId)
+        this.eventPublisher.emit({
+            type: 'session-read-position',
+            sessionId,
+            messageId,
+            updatedAt: observedAt
+        })
+        return { result: 'success', updatedAt: observedAt }
+    }
+
+    locateMessageWindow(
+        sessionId: string,
+        namespace: string,
+        targetMessageId: string,
+        options: { beforeLimit: number; afterLimit: number }
+    ): { type: 'success'; window: import('../store/messages').LocatedWindow } | { type: 'not-found' } | { type: 'access-denied' } {
+        const access = this.sessionCache.resolveSessionAccess(sessionId, namespace)
+        if (!access.ok) return { type: access.reason === 'access-denied' ? 'access-denied' : 'not-found' }
+        const window = this.store.messages.locateMessageWindow(sessionId, targetMessageId, options)
+        if (!window) return { type: 'not-found' }
+        return { type: 'success', window }
+    }
+
     getActiveSessions(): Session[] {
         return this.sessionCache.getActiveSessions()
     }

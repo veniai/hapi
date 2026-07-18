@@ -23,7 +23,7 @@ export { PushStore } from './pushStore'
 export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
 
-const SCHEMA_VERSION: number = 10
+const SCHEMA_VERSION: number = 11
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -124,6 +124,7 @@ export class Store {
             7: () => this.migrateFromV7ToV8(),
             8: () => this.migrateFromV8ToV9(),
             9: () => this.migrateFromV9ToV10(),
+            10: () => this.migrateFromV10ToV11(),
         })
 
         if (currentVersion === 0) {
@@ -192,7 +193,9 @@ export class Store {
                 team_state_updated_at INTEGER,
                 active INTEGER DEFAULT 0,
                 active_at INTEGER,
-                seq INTEGER DEFAULT 0
+                seq INTEGER DEFAULT 0,
+                last_read_message_id TEXT,
+                last_read_at INTEGER
             );
             CREATE INDEX IF NOT EXISTS idx_sessions_tag ON sessions(tag);
             CREATE INDEX IF NOT EXISTS idx_sessions_tag_namespace ON sessions(tag, namespace);
@@ -432,6 +435,17 @@ export class Store {
         if (columns.size === 0) return
         if (!columns.has('service_tier')) {
             this.db.exec('ALTER TABLE sessions ADD COLUMN service_tier TEXT')
+        }
+    }
+
+    private migrateFromV10ToV11(): void {
+        const columns = this.getSessionColumnNames()
+        if (columns.size === 0) return
+        if (!columns.has('last_read_message_id')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN last_read_message_id TEXT')
+        }
+        if (!columns.has('last_read_at')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN last_read_at INTEGER')
         }
     }
 

@@ -10,6 +10,9 @@ import {
     getFirstMessages,
     getDeliverableMessagesAfter,
     getMessagesByPosition,
+    getMessagesByPositionAfter,
+    locateMessageWindow,
+    type LocatedWindow,
     getUninvokedLocalMessages,
     getMatureScheduledMessages,
     getImmediateQueuedLocalMessages,
@@ -62,6 +65,18 @@ export class MessageStore {
 
     getMessagesByPosition(sessionId: string, limit: number, before?: { at: number; seq: number }): StoredMessage[] {
         return getMessagesByPosition(this.db, sessionId, limit, before)
+    }
+
+    getMessagesByPositionAfter(sessionId: string, limit: number, after?: { at: number; seq: number }): StoredMessage[] {
+        return getMessagesByPositionAfter(this.db, sessionId, limit, after)
+    }
+
+    locateMessageWindow(
+        sessionId: string,
+        targetMessageId: string,
+        options: { beforeLimit: number; afterLimit: number }
+    ): LocatedWindow | null {
+        return locateMessageWindow(this.db, sessionId, targetMessageId, options)
     }
 
     getUninvokedLocalMessages(sessionId: string): StoredMessage[] {

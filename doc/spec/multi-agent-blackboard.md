@@ -1,22 +1,114 @@
 # 多 Agent 协作方向 — 黑板架构 spec（构思版）
 
 > fork: `veniai/hapi` · 工作目录 `/home/claw/projects/hapi` · 分支 `work/current`
-> 本文件描述 HAPI 通向多 agent 协作的架构方向（**黑板 / Context Lake**），以及第一步落地功能：**同目录跨 session 上下文感知**。
-> 状态：**构思 + 调研 + 拍板 + Codex 走查完成；已确立双路径（A=v1 / B=存档），待实现 Phase 0**。代码尚未改动。
+> 本文件描述 HAPI 通向多 agent 协作的架构方向（**黑板 / Context Lake**）。**当前权威方向见「决策更新」+「v1.2」**:v1.1 = manager session 做跨 session 记忆检索;v1.2 = manager 主持多 agent 需求讨论→意见稿。下方 §1–§9 是早期「路径 A/B」构思(读层现为 manager 的「眼睛」+ 普通 session 共享,不再当独立 v1 功能)。
+> 状态：**构思 + 调研 + 拍板 + Codex 走查完成。方向已收敛（2026-07-18）→ v1 = manager session（v1.1 跨 session 检索 + v1.2 多 agent 讨论→意见稿，见「决策更新」+「v1.2」）；先前「路径 A 纯读当 v1 用户功能」定位作废**。代码尚未改动。
 > 调研基准：2026-07。
 
 ---
 
 ## 0. TL;DR
 
-- **定位**：HAPI 同时包 Claude/Codex/Cursor/Gemini/OpenCode，数据全集中到 hub。**hub 天然就是一块跨 agent、跨机器的共享黑板（Context Lake）——而这块板就是现有的 `messages` 表。** 本方向 = 让新 session 能读到兄弟 session 干了啥。
-- **两条路径（均记录在案，§5）**：
-  - **路径 A（v1）· 纯读**：新 session 直接读现有 transcript，**读方自己的 LLM 当场消化**。零新表、零迁移、零写侧基建。
-  - **路径 B（存档·待验证）· 写侧预消化**：agent 收尾时预先写 digest 到新表 `blackboard_posts`，读方读现成摘要。完整设计保留（§5.2），等 A 证明"预消化值得"再启用。
-- **红线（两条，两条路都守）**：
-  1. **hub 保持 dumb，绝不碰 LLM**。
-  2. **回喂给 agent 的数据一律不可信**（schema 校验 + 大小上限 + 非指令信封 + 只显式下钻）。
-- **这不是多 agent 编排**，是编排之前更小的一步——只读的、对历史兄弟 session 的感知。
+- **定位**:HAPI 同时包 Claude/Codex/Cursor/Gemini/OpenCode,数据全集中到 hub。**hub 天然就是一块跨 agent、跨机器的共享黑板(Context Lake)——这块板就是现有的 `messages` 表。**
+- **当前方向(2026-07-18 收敛,见「决策更新」+「v1.2」)**:v1 载体 = **manager session**(普通 session + `role=manager` + 专属 prompt、只读、按需)。两步:
+  - **v1.1 · 跨 session 记忆检索**:用户问「以前解决过 X 吗」→ manager 翻兄弟 transcript 综述答案。
+  - **v1.2 · 多 agent 需求讨论→意见稿**:manager spawn 2-3 个(异构)worker **独立答一轮** → 合并成意见稿(一致/争议/开放,带 provenance)。多轮反驳后置。
+- **「眼睛」**:读兄弟 session 状态的 MCP 工具 = manager 的感知层,**同时也是普通 session 可调的共享能力**(不加主动 prompt 引导、不押宝普通 session 主动调)。
+- **红线(两条)**:① **hub 全程 dumb,绝不碰 LLM**(manager 的 LLM 在 agent 侧);② **回喂数据不可信**(综述非粘贴、数据信封不当指令、能力限制为主边界、带 provenance)。
+- **这是编排之前更小的一步**:不是多 agent 编排,是「让一个专职 manager session 感知兄弟 + 主持讨论」。真正编排(派活 / live 协调)留 Phase 3。
+- **下文 §1–§9 是早期「路径 A 纯读 / 路径 B 写侧预消化」构思**:路径 A 读工具现降级为 manager 的眼睛(仍建);路径 B 存档不动。凡读到「v1 = 路径 A」处,均以本 TL;DR +「决策更新」为准。
+
+---
+
+## 决策更新（2026-07-18 · 方向收敛）
+
+> 经讨论收敛。先前 §0/§5/§8 把「路径 A 纯读(L0)」当 v1 用户功能交付——**该定位作废**。路径 A 读工具仍建,但定位变了(见下)。**本节是当前权威方向;Codex 走查(2026-07-18)已逐条核实并入 → v1 定稿。**
+
+**新 v1 = manager session,第一刀 = 跨 session 记忆检索(①)。** 把附 C 的 manager 从 Phase 3 **提到 v1**,作为黑板「存储」之上的「控制」载体。依据:价值正从「单 agent 能力」迁向「多 agent 协调」;HAPI 的执行原语(发消息/起 session/事件订阅)大半现成;manager 是把已有资产(transcript + 控制面)变现的结点。
+
+**v1 只做这个,先搭框架:**
+1. **跨 session 记忆检索**——用户问「以前解决过 X 吗?」→ manager 翻兄弟 transcript、综述答案。只读、答给人看、低风险。**v1 全部用户价值。**
+2. **「眼睛」= manager 感知层,同时是共享 MCP 能力**——同一个读工具,manager 是可靠消费者;**普通 session 也能调**(零额外成本,顺带;只是不押宝普通 session 主动调)。读层照建(原路径 A 的工具),只是不当独立用户功能推,而是 manager 的眼睛 + 普通 session 可选的共享工具。
+3. **通知(能力 2)/派活(能力 3)推迟**——当前钉钉够用,智能通知非 v1 卖点(避免造个会误判的过滤层);派活风险高、最易被更强模型原生吃掉,放后。
+
+**manager 定死(Codex 走查已并入,2026-07-18):**
+- 普通 session 生命周期 + `metadata.role='manager'` + 专属 system prompt。**底层复用普通 session,但产品角色是专职只读 manager,不当 worker。**
+- **默认只读权限 + 最小工具 allowlist**(就 eyes + 回答)。普通 session 默认 `capabilities.terminal=true`(`cli/src/agent/sessionFactory.ts`),manager **必须显式关掉 terminal/edit/网络**——否则被投毒的兄弟 transcript 能诱导它跑命令/改文件(「只答给你看」挡不住,危害在它**自调工具**)。「能当 worker」**移出 v1 承诺**。
+- **role 不是免费 metadata 标签**:`MetadataSchema`(`shared/src/schemas.ts:28`)无 role 且 strict 剥未知字段,hub refresh 用它 `safeParse`(`hub/src/sync/sessionCache.ts:124`)→ 光往 JSON 写 `metadata.role` 会被**静默剥掉**。**role 必须进 MetadataSchema + session summary + 创建/恢复链路**,当合同字段。
+- **按需,不常驻事件驱动**:你打开 + 问才跑,走普通 session 的 resume/reopen。`sendMessage` 要求 session active(`hub/src/web/routes/messages.ts` `requireActive:true`),进程退出了**不会自动重起**——v1 检索用不着自动唤醒;事件驱动 wake-up 跟通知一起延后。
+- **可换框架/模型,但 v1 首选 Claude/Codex**。ACP/Kimi 的 HAPI 指引是**拼进首条 user 消息**(`cli/src/agent/runners/runAgentSession.ts` 的 `SKILL_LOOKUP_INSTRUCTION`),非独立 system/developer 通道,抗注入弱于 Claude/Codex 的 append-system-prompt / developer instructions。「任意框架」= 兼容目标,非 v1 已成立。
+- **创建:手动入口**,可选、可暂停、可删。不强行建、不删不掉。一个 workspace 一个(先做 UI 查找/提示,不承诺 metadata 上的强唯一约束)。
+- 删 manager 不碰别的 session、不碰 transcript。
+
+**红线 + 安全(Codex 走查已并入):**
+- **hub 全程 dumb**:manager 的 LLM 在 manager session(agent 侧),不在 hub;hub 只存数据 + 转发。
+- **回喂不可信 + trust 传播防御**:manager 读兄弟 transcript 再讲出 = 内容跨 session 流动,有投毒传播风险。纪律:① **综述而非原样粘贴**;② 当**数据信封**(tool result / 消息上下文)**、不当指令**;③ **安全主边界 = 能力限制**(只读 + allowlist),不只靠 prompt 纪律;④ **回答带 provenance**(出自哪个 session / 时间 / 消息范围,消息已有 `id/seq/createdAt`)+ 显式表达不确定性,别包装成可信事实。
+- **namespace-first 查询**:list 类(按 cwd 列兄弟)用 `getSessionsByNamespace`(`hub/src/store/sessions.ts`)+ 从认证主体取 namespace(`hub/src/web/routes/sessions.ts:62`),**不**逐项套 per-id 的 `resolveSessionAccess`(那是 per-session-id 的)。**跨表 join messages 时别漏 namespace**(messages 普遍只按 session_id)——先按 namespace 圈 session、再按 id 读消息;**跨 namespace 同 id/cwd 的越权测试 = v1 门槛**。
+- **事件 wake-up 的 user-message 升级风险**(未来才碰):`sendMessage` 固定把输入持久化为 `role:'user'`(`hub/src/sync/messageService.ts:457`);若未来把兄弟内容拼进 wake 消息会获 user 权重、且可能自触发回路。→ 事件唤醒继续留 v1 外;将来用独立结构化内部事件信封,禁转抄 transcript 文本 + 过滤 manager 自身事件 + 去重/预算。
+
+**与原路径 A/B 的关系:**
+- 路径 A 读工具(L0/L2)→ **manager 的眼睛**(仍建)+ 普通 session 共享。
+- 路径 B(写侧预消化)→ **存档不动**,触发条件不变。
+- 路径 A 不再以「Phase 0 纯读独立用户功能」交付。
+- 普通 session 共享 eyes **但不加主动 prompt 引导**(Codex):避免又把路径 A 悄悄恢复成独立产品面 + 增加全 flavor 的提示上下文/测试矩阵。
+
+---
+
+## v1.2 · 多 agent 需求讨论(manager 主持 → 意见稿)
+
+> 状态:**调研背书(deep-research)+ Codex 两轮走查已并入;代码尚未改动。** v1.1 之后第二步。**第一版收成「独立单轮 panel + 单次合并」**(用户拍板 2026-07-18);多轮反驳、`relay_message` 后置。manager 第一个「有界 actuation」= `spawn_worker`(第一版**只需这一个**新工具;`relay_message` 随多轮后置),仍不碰文件。
+
+**定位(最重要,被调研修正过)**:这功能的价值是**多元视角 + 显式分歧地图 + 一份供人拍板的审议产物**,而**不是**「比单个强模型给出更对的答案」。调研最强的结论:**默认多 agent 辩论并不 reliably 打过 单 agent + 强 prompt / self-consistency**(Smit ICML 2024;Du 2023「提升事实性/推理」claim 被对抗投票 **refuted 0-3**)。所以**别按「更聪明」卖**,按「视角更广 + 把分歧摊给你」卖——对**需求/设计这种没有唯一正解**的审议场景,这才真有用。
+
+**协议(第一版 = 独立单轮 + 单次合并;用户拍板 2026-07-18)**:
+1. 你给需求 + 选 2-3 个参与者(**优先不同框架**——Claude + Kimi;同模型两份 = echo chamber)。
+2. manager **spawn** 它们为 worker session(需新建 `spawn_worker` MCP 工具,见「能力分档」;worker = **只读讨论者**,见下「Codex 并入」)。
+3. **各 worker 独立出立场、互不可见**(避锚定)——这是第一版的**全部**交互。
+4. manager 用 eyes 收齐各 worker 答案 → **单次合并**出**意见稿 = {一致项 / 争议项(双/多方并列)/ 开放问题}**,带 provenance。**显式留分歧,绝不强行假一致。** 完。
+
+> **后置(不在第一版)**:多轮反驳(`relay_message` 让 worker 看对方摘要 + 修订 + 自适应停)。仅当第一版跑通、且 manager 真能挑出「某分歧会改结论」时,再做成「可选定向反驳一轮」。多轮会带回 relay 注入面、循环状态、早停判断和大半成本——第一版**不承担**这些。
+
+**必须守的调研反模式(每条有出处)**:
+- **manager 自己是 sycophancy 面,不是解药**(Yao arXiv:2509.23055):judge-driven 崩塌是**独立**失效模式 → manager 的合并**可审计**(provenance)、**残存分歧显式上墙**、不许静默「达成共识」。
+- **长辩论退化**(Tran arXiv:2501.06322):coherence/relevance 随轮数掉 + 成本爆炸 → 硬轮数上限 + 早停 + 预算墙。
+- **dense 拓扑 echo-chamber / 退化到最差答案**(Li EMNLP 2024):难题下「看越多越错」→ star/稀疏(manager 居中转发摘要,不 all-to-all 原文)。
+- **幻觉传播放大**(Tran §6):一个 agent 的幻觉被同伴 reinforce → manager **批判性综合**(不把 worker 的话当事实 relay)+ provenance + 标不确定。
+- **跨 vendor 多样性 = 有条件收益,非万能解药**(Li EMNLP 2024;arXiv:2502.08788「universal antidote」claim **refuted 0-2**):异构只在「强模型放高中心度节点」时略好(~1.2pp、单任务、证据窄)→ 选不同框架是为**视角多样性**,不是为正确率。**judge/manager 用什么模型是开放问题**(调研自列开放;「强模型放高中心度节点」是针对 debater/worker、窄证据,**不能**直接推出 judge 宜强)——落地实测,别预设宜强。
+- **锚定**:第 0 轮互不可见(已进协议)。
+
+**能力分档(承接 v1.1)**:
+
+| 档 | manager 干啥 | v1 |
+|---|---|---|
+| 感知(eyes) | 读兄弟 transcript | v1.1 检索 |
+| **有界 actuation** | `spawn_worker`(**第一版仅此一个**新工具,封顶) | **v1.2 辩论(第一版)** |
+| 文件改动(edit/bash) | —— | **永不给 manager** |
+
+> **第一版没有 worker↔worker relay**(各自独立答、互不见)→ Codex 担心的「relay 把内容当 user 指令注入下一个 worker」**在第一版不存在**(随多轮反驳后置)。manager 只 spawn + 读(eyes)+ 合并。relay 相关的 trust 问题(「manager 综合非主要防线」「relay 被当 `role:'user'`」)留到多轮那一档再啃。
+
+**诚实 caveat(research 明示)**:
+- **领域错配**:几乎所有证据都是数学/事实 QA(GSM8K / trivia / harmlessness);**没有任何研究验证过辩论对「设计审议 / 立场文档」有效**。 → HAPI 这功能是**审议辅助(摊视角 + 摊分歧),不是正确性引擎**;已知坑(sycophancy / echo / 成本 / 打不过 baseline)对设计任务**只会更严重**(a fortiori)。
+- **manager 模型选择未定**:judge-driven sycophancy 跟 manager 用什么模型强相关,但研究没钉死「强 / 弱 / 异构 judge 谁更稳」——开放问题,落地要实测。
+
+**Done 条件(第一版,待实现时补机械项)**:
+- 起 2-3 个(可异构框架)**只读讨论者** worker、**各自独立答一轮(互不见)**、manager 合并出带 provenance 的意见稿(一致 / 争议 / 开放三段)、残存分歧显式上墙。
+- **出意外给残缺意见稿**:worker 掉线 / 超时 / 预算耗尽 → 仍产出意见稿,标清「谁没答、为啥停」,用户决定补不补一轮(Codex 并入)。
+- 成本:`spawn_worker` 有预算上限(防被诱导无限 spawn 烧钱——Codex)。
+- 安全:manager **和** worker 都**不碰文件**(worker 也是只读讨论者)、worker 限定在本 debate 的获准集合 + 当前 workspace(Codex:单 namespace 不够细,要绑 debate / worker IDs)。
+- 一次性:第一版是**点一下 → 等结果 → 完事**,不做可恢复 / 可取消(Codex 的 one-shot vs resumable——先简单)。
+- 手测:同一需求跑「单 agent 强 prompt」 vs 「2 异构 agent 独立答 + 合并」对比意见稿质量(research 要求的 baseline 对比)。
+
+**Codex 走查功能性并入(2026-07-18,两轮)**:① worker 也是**只读讨论者**(普通 session 默认 `terminal:true`,被注入仍能改文件 → 必须锁);② 出意外给**残缺意见稿**而非静默失败;③ **一次性**(非可恢复,先简单);④ 意见稿 = manager 的**一条消息**(不新建表);⑤ provenance 必须**系统校验**(manager 可能编造引用 → 引用要能点回真消息);⑥ `spawn_worker` 不透传 `yolo`/`permissionMode`/任意 model(被注入的 manager 可借此起高权限 worker)。
+**技术 deferred(实现时再啃)**:服务端硬预算怎么落、debate run 状态怎么存(若将来要做可恢复)、namespace 粒度细化、relay 的 `role:'user'` 升权问题(随多轮)。
+
+**调研背书(2026-07-18 deep-research,verified)**:
+- Du et al. ICML 2024 — MAD 基线(固定轮、对称、无 manager / 无投票)— https://arxiv.org/abs/2305.14325
+- Tran et al. 2025 survey — judge-mediated、长辩论退化、幻觉传播 — https://arxiv.org/abs/2501.06322
+- Yao et al. 2025 — sycophancy 使辩论更差、debater / judge 双崩塌 — https://arxiv.org/abs/2509.23055
+- Li et al. EMNLP 2024 — sparse 拓扑、echo-chamber、异构条件性 — https://aclanthology.org/2024.findings-emnlp.427.pdf
+- Smit et al. ICML 2024 — 默认 MAD 打不过 self-consistency / 强 prompt baseline — https://proceedings.mlr.press/v235/smit24a.html
+- AutoGen MAD 官方模式 — solver + 非 LLM aggregator + 多数投票 + sparse — https://microsoft.github.io/autogen/stable/user-guide/core-user-guide/design-patterns/multi-agent-debate.html
+- 完整报告 + 4 条 refuted / 6 条 unverified / 22 条来源清单:归档于 **`doc/research/multi-agent-debate-2026-07.md`**(原始 JSON 曾在 `/tmp/.../w3mns61vy.output`,易失)。
 
 ---
 
@@ -73,13 +165,15 @@ OpenClaw / Hermes / Letta 各自是**一个** agent/系统；Mem0/Zep 是 vendor
 
 1. **hub 保持 dumb：不引入任何 LLM SDK、不持 model key、不做有状态压缩。** 路径 A 天然满足（只查现有数据）；路径 B 由 agent 产 digest（非 hub）。
 2. **回喂给 agent 的数据一律不可信。** 无论 A（读兄弟 transcript，里面可能含注入内容）还是 B（agent 自写 post）都成立：版本化 Zod + 大小上限 + **非指令信封**（tool result，非 system prompt）+ **L1/L2 只显式下钻、绝不自动注入**。
-3. **namespace 是硬隔离，但只在路由层成立。** 新接口**必须**过 `resolveSessionAccess`（`hub/src/sync/sessionCache.ts:52`）；**绝不**直接调 store 裸 `getSession(id)`（`hub/src/store/sessions.ts:568`，IDOR 陷阱）。
+3. **namespace 是硬隔离,但只在路由层成立。** 按 **ID** 读走 `resolveSessionAccess`(`hub/src/sync/sessionCache.ts:52`);**list / 集合**查询走 namespace-scoped(`getSessionsByNamespace` + 从认证主体取 namespace——见决策更新「namespace-first」)。**绝不**直接调 store 裸 `getSession(id)`(`hub/src/store/sessions.ts:568`,IDOR 陷阱)。
 4. **不碰用户的 CLAUDE.md / AGENTS.md**——只动 HAPI 自己注入的 system prompt。
 5. **先 Claude 单 flavor 跑通，再铺其他**（路径 B 的覆盖矩阵见 §5.2）。
 
 ---
 
 ## 4. 总体架构
+
+> ⚠️ **方向已收敛(见「决策更新」)**:图里的「路径 A·读 = v1」现降级为 **manager 的「眼睛」+ 普通 session 共享**;v1 载体是 **manager session**,不是「路径 A 当独立 v1 功能」。下图保留作读层 substrate 参考。
 
 ```
                          ┌─────────────────────────────────────┐
@@ -107,7 +201,7 @@ OpenClaw / Hermes / Letta 各自是**一个** agent/系统；Mem0/Zep 是 vendor
 
 兄弟 session 的数据 HAPI **早就有**（`messages` 全量）。问题天然分两条路，**分歧只在 L1（摘要）由谁产、存不存**：
 
-| | **路径 A：纯读（v1）** | **路径 B：写侧预消化（存档·待验证）** |
+| | **路径 A:纯读(manager 的眼睛·共享)** | **路径 B:写侧预消化(存档·待验证)** |
 |---|---|---|
 | "兄弟干了啥"怎么来 | 新 session 读现有 transcript，**读方 LLM 当场消化** | agent 收尾**预写 digest** 到新表，读方读现成摘要 |
 | L1（digest） | 读方按需消化 L2，**不落库** | `blackboard_posts.body`，**预存** |
@@ -122,6 +216,8 @@ OpenClaw / Hermes / Letta 各自是**一个** agent/系统；Mem0/Zep 是 vendor
 
 **决定（2026-07-18）：v1 走路径 A。** 一个读侧 MCP 工具扒现有数据，零新表零迁移零写侧基建。**路径 B 完整存档（§5.2）**，连同 Codex 走查的 8 条硬约束作为届时现成规格。
 
+> ⚠️ **方向调整（2026-07-18 续，见「决策更新」）**：路径 A 读工具仍建，但降级为 **manager 的感知层 + 普通 session 共享工具**，不再当 v1 独立用户功能交付。v1 载体改为 manager session。
+
 **从 A 切到 B 的触发条件**（任一满足即重新评估）：
 1. 纯读跑下来，读方消化原始 transcript 的 token 成本被证明确实痛（频繁、量大）；
 2. 用户明确想要"预消化摘要"（web 上翻、离线 digest）；
@@ -131,7 +227,7 @@ OpenClaw / Hermes / Letta 各自是**一个** agent/系统；Mem0/Zep 是 vendor
 
 ---
 
-### 5.1 路径 A（v1）· 纯读 + 读方按需消化
+### 5.1 路径 A · 纯读 + 读方按需消化（= manager 的眼睛；见「决策更新」）
 
 | 层 | 内容 | 来源 | 安全 |
 |---|---|---|---|
@@ -150,11 +246,13 @@ OpenClaw / Hermes / Letta 各自是**一个** agent/系统；Mem0/Zep 是 vendor
   -- 首问：单独一次批量取，或 join messages 限 1
   ```
 
-- **MCP 工具**（CLI happy server；**全部过 `resolveSessionAccess` + 按 namespace + path 过滤**）：
+  > ⚠️ **此 SQL 有 bug(走查发现)**:`PARTITION BY id` 在 `sessions` 表(每 session 一行)上是**空操作**。窗口函数应改用在 **`messages`** 上(`PARTITION BY session_id ORDER BY seq ASC` 取首条 user msg);sessions 侧直接 `WHERE namespace + path ORDER BY updated_at DESC LIMIT ?` 即可。实现时修正。
+
+- **MCP 工具**(CLI happy server;**按 namespace-scoped 查询 + path 过滤**——list 类**不**套 per-id 的 `resolveSessionAccess`,见决策更新「namespace-first」):
   - `hapi__sibling_sessions({ cwd?, limit?, since? })` → L0
   - `hapi__sibling_messages({ sessionId, range })` → L2
   - L1 不需专门工具（读方拉 L2 自总结）；可选 `hapi__sibling_digest({ sessionId })` 让读方明确"帮我消化"，但仍由**读方 LLM** 出、不落库。
-- system prompt 加一行指引：「想了解本目录其他 session 干了什么，调 `hapi__sibling_sessions`」。
+- system prompt:**只给 manager** 加指引;**普通 session 不加主动 prompt 引导**(见决策更新——避免又把路径 A 恢复成独立产品面 + 增加全 flavor 提示上下文)。
 
 ---
 
@@ -245,7 +343,7 @@ OpenClaw / Hermes / Letta 各自是**一个** agent/系统；Mem0/Zep 是 vendor
 
 ## 6. 决策记录
 
-**顶层决定（2026-07-18）**：**v1 = 路径 A（纯读）；路径 B 完整存档（§5.2），待 §5.0 触发条件启用。**
+**顶层决定（2026-07-18）**：~~v1 = 路径 A（纯读）~~ → **方向收敛后（见「决策更新」+「v1.2」）改为：v1.1 = manager 跨 session 检索、v1.2 = manager 主持多 agent 讨论→意见稿**；路径 A 读工具降级为 manager 的眼睛（仍建）；路径 B 完整存档（§5.2），触发条件不变。下表为**路径 B 的设计参数（存档）**。
 
 下表为**路径 B 的设计参数（存档，v1 不实现）**，原 2026-07-17 拍板内容保留：
 
@@ -264,7 +362,7 @@ OpenClaw / Hermes / Letta 各自是**一个** agent/系统；Mem0/Zep 是 vendor
 
 ## 7. 对 HAPI 的影响
 
-**路径 A（v1，小）：**
+**路径 A（= manager 的眼睛，小）：**
 
 | # | 影响面 | 严重度 | 取舍 |
 |---|---|---|---|
@@ -292,6 +390,8 @@ OpenClaw / Hermes / Letta 各自是**一个** agent/系统；Mem0/Zep 是 vendor
 
 ## 8. 演进路线
 
+> ⚠️ **方向收敛后（2026-07-18，见「决策更新」+「v1.2」）**：manager 提为 v1。新演进顺序：**眼睛（读层 = manager 感知 + 普通 session 共享）→ manager 跨 session 检索（v1.1）→ 多 agent 辩论→意见稿（v1.2）→ 通知/派活（后）**。下方原 Phase 0→3 图保留作历史参考。
+
 ```mermaid
 graph LR
   P0[Phase 0<br/>路径 A·L0 只读<br/>v1 主体·零新表] --> P1[Phase 1<br/>路径 A·L2 + 读方按需消化]
@@ -304,7 +404,7 @@ graph LR
 - **Phase 0**（v1 主体，零成本）：路径 A 只读 L0——按 `path_canonical` 列 sibling（单 SQL），标题 + 首问 + 状态 + 时间。一个 MCP 工具（过 `resolveSessionAccess`）+ 一行 system prompt。**不动 schema、不写板。**
 - **Phase 1**：路径 A 补 L2（transcript 切片）+ 读方按需消化（L1 不落库）。
 - **Phase 2（条件触发）**：若 §5.0 触发条件满足 → 启用路径 B（建表 + 迁移 + 写侧全套，用 §5.2 存档规格 + Codex 8 条）。
-- **Phase 3（未来，真正多 agent 编排）**：live 写协调、ACP mesh、向量检索、bi-temporal 图谱。
+- **Phase 3（未来，真正多 agent 编排）**：live 写协调、ACP mesh、向量检索、bi-temporal 图谱，以及**控制层（workspace 总管 / "包工头"）**——方向与可行性见 **附 C**。
 
 ---
 
@@ -350,6 +450,8 @@ graph LR
 
 - **2026-07-17**：§6 路径 B 的 6 项设计参数拍板（全选推荐方案）；Codex review 走查（14 条 code claim：12 确认 / 2 部分对 / 0 错），8 条硬约束并入。
 - **2026-07-18**：**确立双路径，v1 = 路径 A（纯读）**。起因：退一步审视发现"兄弟数据早已在 `messages`，不必让 agent 重写"；写侧（路径 B）的 90% 复杂度（注入/幂等/迁移/Stop hook/生命周期/可靠性）只源于"要写"这个起点假设。路径 B 完整存档（§5.2），不删，待 §5.0 触发条件启用。
+- **2026-07-18(续)·方向收敛**:manager 从 Phase 3 提到 v1。v1.1 = manager 跨 session 记忆检索;路径 A 读工具降级为 manager 的眼睛 + 普通 session 共享。Codex 走查 5 条核实并入(role 进 schema、只读专职、按需非常驻、namespace-first、Claude/Codex 优先)。
+- **2026-07-18(续)·v1.2**:加「多 agent 需求讨论→意见稿」(manager 主持)。deep-research 调研背书(8 条 verified)。Codex 两轮走查。**用户拍板第一版收成「独立单轮 panel + 单次合并」**,多轮反驳 / `relay_message` 后置。
 
 ## 附 B：Codex review 走查结论（2026-07-17）
 
@@ -359,3 +461,52 @@ graph LR
 - **8 条真问题**（注入防御 / namespace 守卫 / 幂等防双写 / path 身份指纹 + deploy-worktree false-neg / 跨 flavor 覆盖矩阵 / delete-merge 生命周期 / L0 N+1 / migration 建表写法）——**对路径 A 适用的**（namespace 守卫、N+1）已并入 §5.1；**路径 B 专有的**（其余）保留在 §5.2 作其规格。
 - **1 条框架修正**：Codex 说"namespace 天然隔离是假的"——**说过头**。路由层 `resolveSessionAccess` 全仓库一致查 namespace，隔离**是设计了**；陷阱只在于"新接口别绕过守卫直接查 store 裸 `getSession(id)`"。
 - **未采信（存疑）**：Codex 对比表里标了"unverified"的各系统"缺 X"猜测；"Stop hook 死循环"是 hypothesis（路径 B 已用 fail-open + 最多一次规避）。
+
+---
+
+## 附 C：控制层方向 — workspace 总管（"包工头"，Phase 3）
+
+> 状态：**已提为 v1 载体（2026-07-18 方向收敛，见「决策更新」）**——manager 从 Phase 3 提到 v1，第一刀 = 跨 session 记忆检索。补全黑板的“控制”半边（存储见 §5）。
+>
+> ⚠️ **本附 C.1–C.5 是早期「3 能力」框架(答情况 / 智能通知 / 派活),作参考。收敛后实际顺序 = v1.1 检索(= 能力 1)→ v1.2 多 agent 辩论(新增,非原 3 能力)→ 通知(能力 2)/ 派活(能力 3)后置。** C.1 表里的 spawn/sendMessage 现按 v1.2 实际落地(`spawn_worker` 第一版建、`relay_message` 后置,见 v1.2 协议)。
+
+### C.0 一句话
+
+黑板（§5）是**存储**；这个"总管"是**控制**——即 Codex 走查时指出的"经典黑板缺的那个 control loop"。它是一个 **per-workspace 的 agent session**，像**包工头**：workspace 里其他 session（Claude/Codex/GLM/Kimi）是干活的工人，它自己不写代码，管"人和事"。
+
+**独特价值 = 主动**：黑板的被动按需读取（路径 A）不需要它；凡需要"有人主动盯、判断、行动"的，才归它。
+
+### C.1 三个能力 + 可行性（底层已核实）
+
+| 能力 | 需要什么 | 现成能力（已验证）| 要新建 | 难度 |
+|---|---|---|---|---|
+| **1. 答"workspace 现在啥情况"** | manager session + 读兄弟状态 | 读兄弟数据 = 路径 A（全量在 hub）| manager 标记 + workspace 分组 | 🟢 易 |
+| **2. 智能喊你**（升级 dumb 钉钉）| 事件唤醒 manager + LLM 判断 + 发钉钉 | 事件订阅（NotificationHub 模式）、`sendMessage` 注入、钉钉渠道 | "事件 → 注入消息给 manager"接线 | 🟡 中 |
+| **3. 派活分给工人** | spawn 工人 + 发活 + 盯完成 + 防撞车 | runner `/spawn-session`、`sendMessage` | 编排智能（谁干啥 / 盯完成 / 冲突）| 🟠 中-难 |
+
+底层基本现成——**因为 HAPI 是远程控制平台，"给 session 发消息、按需起 session、定时唤醒"本来就是它的核心**。证据：`hub/src/web/routes/messages.ts`（sendMessage）、`cli/src/runner/controlServer.ts`（`/spawn-session`）、scheduled-matured 定时投递、NotificationHub 已订阅 sync 事件。
+
+### C.2 怎么接（机制）
+
+- **manager = 一个普通 session + 标记**：加 `metadata.role = 'manager'`（或 session kind），绑到 workspace（path）。
+  > ⚠️ 现有 `sessionType` 是 **spawn 模式**（`'simple' | 'worktree'`，见 `cli/src/runner/controlServer.ts:112`），**不是角色**——别拿它当 manager 标记，要另设字段。
+- **唤醒两条**：
+  - **事件驱动**：hub 订阅 workspace 事件（`session-added/updated/ended`、`message-received`），relevant 时用 `sendMessage` 注入一条给 manager（"workspace 有变化：…"），它醒来处理、干完即睡。
+  - **定时**：scheduled message 到点投递（已有机制）——"每小时巡检""每天总结"。
+- **工具**（MCP，包在 happy server，复用现有 REST/RPC）：`list_workspace_sessions`、`read_sibling_state`、`spawn_worker`、`send_task`、`read_sibling_transcript`。
+- **不常驻烧钱**：事件驱动 + 预算上限。
+
+### C.3 模型
+
+就是个被包的 agent session，用户选（Claude/GLM/...）。管人不写代码，**默认中等模型**，难任务升级，设预算上限。
+
+### C.4 诚实 caveat
+
+1. **难的不是基建（大半现成），是能力 3 的编排智能**——谁干啥、盯完成、防撞车，那是真功夫。
+2. **依赖** workspace 概念 + 跨 session 工具（= 黑板 Phase 1/2 也要的）→ 所以排 **Phase 3**。
+3. **用户掌控调性**：先当顾问/协调，重大动作（派活/交接）要用户确认，别一上来当自主老板。
+4. **成本**：务必事件驱动 + 预算墙，不然自己把钱烧光。
+
+### C.5 起步顺序
+
+能力 1（几乎现成，先立住"包工头"）→ 能力 2（升级 dumb 钉钉，已有痛点，性价比最高）→ 能力 3（真编排，最后）。
