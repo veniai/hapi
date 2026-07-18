@@ -35,7 +35,7 @@ export function useReadPositionReporter({
             expectedLastReadAt: lastKnownRef.current
         }
         const url = `/api/sessions/${encodeURIComponent(sid)}/read-position`
-        const token = apiRef.current.token
+        const token = apiRef.current.getBearerToken()
         try {
             fetch(url, {
                 method: 'POST',
