@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { isObject, toSessionSummary } from '@hapi/protocol'
 import { MachinePatchSchema, MachineSchema, SessionPatchSchema, SessionSchema } from '@hapi/protocol/schemas'
+import { applySessionSummaryPatch } from '@/lib/session-summary-patch'
 import type {
     Machine,
     MachinesResponse,
@@ -331,23 +332,7 @@ export function useSSE(options: {
                     return previous
                 }
 
-                const nextSummary: SessionSummary = {
-                    ...current,
-                    active: patch.active ?? current.active,
-                    thinking: patch.thinking ?? current.thinking,
-                    activeAt: patch.activeAt ?? current.activeAt,
-                    updatedAt: patch.updatedAt ?? current.updatedAt,
-                    backgroundTaskCount: Object.prototype.hasOwnProperty.call(patch, 'backgroundTaskCount')
-                        ? patch.backgroundTaskCount ?? 0
-                        : current.backgroundTaskCount,
-                    // §2.1 red-dot revisions: fall back to the cached value, then 0,
-                    // so a patch carrying only one of them (or an older cached
-                    // summary without the field) never produces undefined.
-                    attentionRev: patch.attentionRev ?? current.attentionRev ?? 0,
-                    handledRev: patch.handledRev ?? current.handledRev ?? 0,
-                    model: Object.prototype.hasOwnProperty.call(patch, 'model') ? patch.model ?? null : current.model,
-                    effort: Object.prototype.hasOwnProperty.call(patch, 'effort') ? patch.effort ?? null : current.effort
-                }
+                const nextSummary: SessionSummary = applySessionSummaryPatch(current, patch)
 
                 patched = true
                 nextSessions[index] = nextSummary
