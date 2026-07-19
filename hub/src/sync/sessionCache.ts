@@ -22,6 +22,12 @@ export class SessionCache {
     private readonly deduplicatePending: Set<string> = new Set()
     private readonly pendingThinkingUntilBySessionId: Map<string, number> = new Map()
     private readonly runtimeConfigUpdatedAtBySessionId: Map<string, Partial<Record<RuntimeConfigKey, number>>> = new Map()
+    // Cache-only (not persisted): the message id at the most recent attention
+    // bump — the "unread start" hint for web-chat-read-position-sync §2.3. Set
+    // when bumpAttention carries a message id (the agent ready-event message).
+    // Lost on hub restart, which is fine: the web falls back to saved/hub
+    // read-anchor or latest in that case.
+    private readonly lastAttentionMessageIdBySession: Map<string, string> = new Map()
 
     constructor(
         private readonly store: Store,
@@ -175,7 +181,8 @@ export class SessionCache {
             lastReadMessageId: stored.lastReadMessageId,
             lastReadAt: stored.lastReadAt,
             attentionRev: stored.attentionRev,
-            handledRev: stored.handledRev
+            handledRev: stored.handledRev,
+            lastAttentionMessageId: this.lastAttentionMessageIdBySession.get(stored.id) ?? null
         }
 
         this.sessions.set(sessionId, session)
@@ -373,13 +380,22 @@ export class SessionCache {
      *  Atomically ++attention_rev in the store, mirrors it into the cached
      *  Session, and (unless `silent`) broadcasts a session-updated patch so
      *  every device can re-evaluate its red dot. Returns the new rev, or null
-     *  if the session does not exist. */
-    bumpAttention(sessionId: string, options?: { silent?: boolean }): number | null {
+     *  if the session does not exist.
+     *
+     *  `messageId` (optional): the message that triggered this attention bump
+     *  (e.g. the agent ready-event message). Recorded cache-only as the
+     *  "unread start" hint (§2.3) so the web can land there instead of latest
+     *  when there is no saved/shared read anchor. */
+    bumpAttention(sessionId: string, options?: { silent?: boolean; messageId?: string }): number | null {
         const session = this.sessions.get(sessionId) ?? this.refreshSession(sessionId)
         if (!session) return null
         const nextRev = this.store.sessions.bumpAttentionRev(sessionId, session.namespace)
         if (nextRev === null) return null
         session.attentionRev = nextRev
+        if (options?.messageId) {
+            this.lastAttentionMessageIdBySession.set(sessionId, options.messageId)
+            session.lastAttentionMessageId = options.messageId
+        }
         if (!options?.silent) {
             this.publisher.emit({
                 type: 'session-updated',
@@ -864,6 +880,7 @@ export class SessionCache {
         this.lastBroadcastAtBySessionId.delete(sessionId)
         this.todoBackfillAttemptedSessionIds.delete(sessionId)
         this.pendingThinkingUntilBySessionId.delete(sessionId)
+        this.lastAttentionMessageIdBySession.delete(sessionId)
 
         this.publisher.emit({ type: 'session-removed', sessionId, namespace: session.namespace })
     }

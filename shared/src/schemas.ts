@@ -237,7 +237,11 @@ export const SessionSchema = z.object({
     // them (migration v12 backfills 0) and the summary shapes them as required
     // numbers; consumers read defensively (?? 0).
     attentionRev: z.number().optional(),
-    handledRev: z.number().optional()
+    handledRev: z.number().optional(),
+    // web-chat-read-position-sync §2.3: cache-only hint (not persisted) for the
+    // message id at the most recent attention bump — the "unread start" target
+    // when there is no saved/shared read anchor.
+    lastAttentionMessageId: z.string().nullable().optional()
 })
 
 export type Session = z.infer<typeof SessionSchema>

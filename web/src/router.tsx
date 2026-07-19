@@ -43,7 +43,7 @@ import { fetchLatestMessages, gcMessageWindows, seedMessageWindowFromSession } f
 import { gcChatScrollPositions, readChatScrollPosition } from '@/lib/chat-scroll-store'
 import { clearDraftsAfterSend } from '@/lib/clearDraftsAfterSend'
 import { inactiveSessionCanResume } from '@/lib/sessionResume'
-import { markSessionSeen } from '@/lib/sessionLastSeen'
+import { markSessionSeen, getSessionLastSeenAt } from '@/lib/sessionLastSeen'
 import { useSessionBrowserTitle } from '@/hooks/useSessionBrowserTitle'
 import { clearCodexImportedSession, markCodexSessionsImported } from '@/lib/codexImportedSessions'
 import type { Machine, CodexDuplicateSessionGroup, CodexLocalSessionSummary } from '@/types/api'
@@ -690,7 +690,14 @@ function SessionPage() {
         const saved = readChatScrollPosition(sessionId)
         const savedMessageId = saved?.anchor?.messageId ?? null
         const hubMessageId = session?.lastReadMessageId ?? null
-        let target: string | null = savedMessageId ?? hubMessageId
+        // §2.3 unread-start: when there is no local/shared read anchor but the
+        // session has unread attention, land at the hub's last-attention message
+        // (the most recent result) instead of jumping to latest. Falls through
+        // to latest only when there is also no attention (§2.3 final clause).
+        const hasUnreadAttention = !!session
+            && (session.attentionRev ?? 0) > Math.max(getSessionLastSeenAt(sessionId), session.handledRev ?? 0)
+        const unreadStartMessageId = hasUnreadAttention ? (session?.lastAttentionMessageId ?? null) : null
+        let target: string | null = savedMessageId ?? hubMessageId ?? unreadStartMessageId
         if (target?.startsWith('__optimistic__')) target = null
         let cancelled = false
         setLocatorTarget(null)

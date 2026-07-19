@@ -491,9 +491,10 @@ export class SyncEngine {
 
     /** Raise the session's attention revision (§2.1/§4.1). Wired to the CLI
      *  socket handlers' `onAttentionBump` — fires on agent-result content and
-     *  on a permission/input request appearing. */
-    bumpAttention(sessionId: string): number | null {
-        return this.sessionCache.bumpAttention(sessionId)
+     *  on a permission/input request appearing. `messageId` (when known) is
+     *  recorded as the unread-start hint (§2.3). */
+    bumpAttention(sessionId: string, messageId?: string): number | null {
+        return this.sessionCache.bumpAttention(sessionId, messageId !== undefined ? { messageId } : undefined)
     }
 
     recordSessionActivity(sessionId: string, updatedAt: number): void {
