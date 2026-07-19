@@ -40,7 +40,7 @@ import { queryKeys } from '@/lib/query-keys'
 import { useToast } from '@/lib/toast-context'
 import { useTranslation } from '@/lib/use-translation'
 import { fetchLatestMessages, gcMessageWindows, seedMessageWindowFromSession } from '@/lib/message-window-store'
-import { gcChatScrollPositions, readChatScrollPosition } from '@/lib/chat-scroll-store'
+import { gcChatScrollPositions } from '@/lib/chat-scroll-store'
 import { clearDraftsAfterSend } from '@/lib/clearDraftsAfterSend'
 import { inactiveSessionCanResume } from '@/lib/sessionResume'
 import { markSessionSeen } from '@/lib/sessionLastSeen'
@@ -693,23 +693,14 @@ function SessionPage() {
         // detail load errored, proceed with the local saved anchor only.
         if (!session && !sessionError) return
         lastLoadedRef.current = sessionId
-        const saved = readChatScrollPosition(sessionId)
-        const savedMessageId = saved?.anchor?.messageId ?? null
-        const hubMessageId = session?.lastReadMessageId ?? null
-        // Prefer the local saved anchor (synchronous, no race). The hub
-        // lastRead is set by a keepalive POST on pagehide which races with the
-        // reload's GET-session — so hub may be stale on refresh and LWW(picked
-        // hub) was landing on the wrong message. Saved is authoritative for the
-        // same device; hub only matters cross-device (when saved is absent).
-        let target: string | null = savedMessageId ?? hubMessageId
-        // optimistic ids are temporary (not-yet-confirmed by hub) and aren't in
-        // the DB — locating them 404s and wipes the saved anchor. Drop to null
-        // (latest) instead.
-        if (target?.startsWith('__optimistic__')) {
-            target = null
-        }
-        setLocatorTarget(target)
-        void loadInitial(target)
+        // locator (fetchLocatedWindow) was unstable on reload: the reporter's
+        // keepalive POST races the reload's GET-session, and restoreScrollAnchor
+        // timing vs layout left the landing ~1 message off every time. Cut it.
+        // Reload now goes through saved restore (loadOlder loop) — the SAME path
+        // that already works when switching sessions without a refresh. Cross-
+        // device sync via locator is dropped for now; single-device use dominates.
+        setLocatorTarget(null)
+        void loadInitial(null)
     }, [api, sessionId, session, sessionError, loadInitial])
 
     // Tracks the most recent send the hub rejected (4xx/5xx/network), keyed
