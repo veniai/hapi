@@ -411,6 +411,30 @@ describe('message-window-store async generations', () => {
             limit: 50,
         })
     })
+
+    it('removes a pending message when fetchOlder makes it visible', async () => {
+        const queued = makeMsg({ id: 'queued-overlap', seq: 10, createdAt: 1_700_000_500_000 })
+        const api = {
+            getMessages: vi.fn()
+                .mockResolvedValueOnce({
+                    messages: [makeAgentMessage({ id: 'latest', seq: 11, createdAt: 1_700_000_500_001 })],
+                    page: { limit: 50, nextBeforeAt: 1_700_000_500_001, nextBeforeSeq: 11, hasMore: true }
+                })
+                .mockResolvedValueOnce({
+                    messages: [queued],
+                    page: { limit: 50, nextBeforeAt: null, nextBeforeSeq: null, hasMore: false }
+                })
+        } as unknown as ApiClient
+
+        await fetchLatestMessages(api, SESSION_ID)
+        setAtBottom(SESSION_ID, false)
+        ingestIncomingMessages(SESSION_ID, [queued])
+        await fetchOlderMessages(api, SESSION_ID)
+
+        const state = getMessageWindowState(SESSION_ID)
+        expect(state.messages.filter((message) => message.id === queued.id)).toHaveLength(1)
+        expect(state.pending.some((message) => message.id === queued.id)).toBe(false)
+    })
 })
 
 describe('message-window-store status updates', () => {
@@ -901,6 +925,31 @@ describe('fetchNewerMessages', () => {
         const state = getMessageWindowState(SESSION_ID)
         expect(state.hasNewer).toBe(true)
         expect(state.atBottom).toBe(false)
+    })
+
+    it('removes a pending message when fetchNewer makes it visible', async () => {
+        await seedLocatedWindow(true, { at: 1_000, seq: 5 })
+        const queued = makeMsg({ id: 'queued-overlap', seq: 6, createdAt: 1_100 })
+        ingestIncomingMessages(SESSION_ID, [queued])
+        const api = {
+            getMessages: vi.fn(async () => ({
+                messages: [queued],
+                page: {
+                    limit: 50,
+                    nextBeforeAt: null,
+                    nextBeforeSeq: null,
+                    nextAfterAt: null,
+                    nextAfterSeq: null,
+                    hasMore: false
+                }
+            }))
+        } as unknown as ApiClient
+
+        await fetchNewerMessages(api, SESSION_ID)
+
+        const state = getMessageWindowState(SESSION_ID)
+        expect(state.messages.filter((message) => message.id === queued.id)).toHaveLength(1)
+        expect(state.pending.some((message) => message.id === queued.id)).toBe(false)
     })
 
     it('is a no-op when the window has no newer messages', async () => {
