@@ -11,11 +11,9 @@ import { HappySystemMessage } from '@/components/AssistantChat/messages/SystemMe
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/Spinner'
 import { useTerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
-import { useReadPositionReporter } from '@/hooks/useReadPositionReporter'
 import { useTranslation } from '@/lib/use-translation'
 import { CloseIcon } from '@/components/icons'
 import {
-    readChatScrollPosition,
     writeChatScrollPosition,
     type PersistedChatScrollPosition
 } from '@/lib/chat-scroll-store'
@@ -378,18 +376,7 @@ export function HappyThread(props: {
     const newerSentinelRef = useRef<HTMLDivElement | null>(null)
     const positionSettledRef = useRef(false)
 
-    // Report last-read position to hub (pagehide/visibility/switch, low-frequency)
-    useReadPositionReporter({
-        api: props.api,
-        sessionId: props.sessionId,
-        getAnchorMessageId: () => {
-            if (!positionSettledRef.current) return null
-            const viewport = viewportRef.current
-            if (!viewport) return null
-            return captureScrollAnchor(viewport)?.messageId ?? null
-        },
-        lastKnownHubReadAt: props.hubLastReadAt
-    })
+    // 回退到 spec 之前：不上报阅读位置到 hub（read-position reporter 退掉）。
 
     const loadLockRef = useRef(false)
     const pendingScrollRef = useRef<PendingScrollRestore | null>(null)
@@ -409,7 +396,8 @@ export function HappyThread(props: {
     const onFlushPendingRef = useRef(props.onFlushPending)
     const forceScrollTokenRef = useRef(props.forceScrollToken)
     const lastScrollTopRef = useRef(0)
-    const pendingSavedScrollRef = useRef<PersistedChatScrollPosition | null>(readChatScrollPosition(props.sessionId))
+    // 回退到 spec 之前：不读 saved 滚动位置（无滚动记忆），进入即落底。
+    const pendingSavedScrollRef = useRef<PersistedChatScrollPosition | null>(null)
     const initialLatestPositionPendingRef = useRef(pendingSavedScrollRef.current === null)
     // Bounded re-verification state (see verifySavedRestore).
     const savedRestoreVerificationRef = useRef<{ anchor: ScrollAnchor; deadline: number } | null>(null)
