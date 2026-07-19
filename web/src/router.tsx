@@ -40,7 +40,7 @@ import { queryKeys } from '@/lib/query-keys'
 import { useToast } from '@/lib/toast-context'
 import { useTranslation } from '@/lib/use-translation'
 import { fetchLatestMessages, gcMessageWindows, seedMessageWindowFromSession } from '@/lib/message-window-store'
-import { gcChatScrollPositions } from '@/lib/chat-scroll-store'
+import { gcChatScrollPositions, readChatScrollPosition } from '@/lib/chat-scroll-store'
 import { clearDraftsAfterSend } from '@/lib/clearDraftsAfterSend'
 import { inactiveSessionCanResume } from '@/lib/sessionResume'
 import { markSessionSeen } from '@/lib/sessionLastSeen'
@@ -672,10 +672,23 @@ function SessionPage() {
         fetchNewer: fetchNewerMessages,
     } = useMessages(api, sessionId)
 
-    // locator 砍掉：reload 走 hydrate + saved restore（同不刷新切回），不
-    // fetchLatest/locator（fetchLatest 的 layout 时序破坏 saved restore offset）。
-    // locatorTarget 常驻 null → HappyThread target 模式关闭 → saved restore 接管。
-    const [locatorTarget] = useState<string | null>(null)
+    // locator 恢复：target = saved ?? hub（saved 优先解 reporter/reload race）。
+    // useMessages fetchLatest effect（保底 messages 显示）始终跑；loadInitial 额外定位。
+    const [locatorTarget, setLocatorTarget] = useState<string | null>(null)
+    const lastLoadedRef = useRef<string | null>(null)
+    useEffect(() => {
+        if (!api || !sessionId) return
+        if (lastLoadedRef.current === sessionId) return
+        if (!session && !sessionError) return
+        lastLoadedRef.current = sessionId
+        const saved = readChatScrollPosition(sessionId)
+        const savedMessageId = saved?.anchor?.messageId ?? null
+        const hubMessageId = session?.lastReadMessageId ?? null
+        let target: string | null = savedMessageId ?? hubMessageId
+        if (target?.startsWith('__optimistic__')) target = null
+        setLocatorTarget(target)
+        void loadInitial(target)
+    }, [api, sessionId, session, sessionError, loadInitial])
 
     // Tracks the most recent send the hub rejected (4xx/5xx/network), keyed
     // by the session the failed POST actually targeted (post-resolveSessionId).
