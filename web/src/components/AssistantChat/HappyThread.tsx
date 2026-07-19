@@ -91,6 +91,9 @@ export function captureScrollAnchor(viewport: HTMLElement): ScrollAnchor | null 
             const messageId = message.id.startsWith('hapi-message-')
                 ? message.id.slice('hapi-message-'.length)
                 : message.id
+            // Skip optimistic (not-yet-confirmed) messages — their id is temporary
+            // and isn't a durable scroll/locate target.
+            if (messageId.startsWith('__optimistic__')) continue
             return {
                 id: message.id,
                 topOffset: rect.top - viewportRect.top,
@@ -114,9 +117,13 @@ export function captureReadPositionAnchor(viewport: HTMLElement): string | null 
         if (message.dataset.hapiRole !== 'agent') continue
         const rect = message.getBoundingClientRect()
         if (rect.top >= viewportRect.top && rect.bottom <= viewportRect.bottom) {
-            return message.id.startsWith('hapi-message-')
+            const id = message.id.startsWith('hapi-message-')
                 ? message.id.slice('hapi-message-'.length)
                 : message.id
+            // Skip optimistic ids — they aren't in the hub DB; reporting one would
+            // make the next entry's locator 404 and lose the read position.
+            if (id.startsWith('__optimistic__')) continue
+            return id
         }
     }
     return null
