@@ -15,7 +15,7 @@ function hasOwn(patch: SessionPatch, key: string): boolean {
  *    never yields undefined.
  *  - `backgroundTaskCount`: explicit key (incl. undefined) → coerce to 0;
  *    absent key → keep cached.
- *  - nullable model/effort: explicit key → null-if-undefined; absent → cached. */
+ *  - nullable model/modelReasoningEffort/effort: explicit key → null-if-undefined; absent → cached. */
 export function applySessionSummaryPatch(current: SessionSummary, patch: SessionPatch): SessionSummary {
     return {
         ...current,
@@ -29,6 +29,9 @@ export function applySessionSummaryPatch(current: SessionSummary, patch: Session
         attentionRev: patch.attentionRev ?? current.attentionRev ?? 0,
         handledRev: patch.handledRev ?? current.handledRev ?? 0,
         model: hasOwn(patch, 'model') ? patch.model ?? null : current.model,
+        modelReasoningEffort: hasOwn(patch, 'modelReasoningEffort')
+            ? patch.modelReasoningEffort ?? null
+            : current.modelReasoningEffort,
         effort: hasOwn(patch, 'effort') ? patch.effort ?? null : current.effort
     }
 }
