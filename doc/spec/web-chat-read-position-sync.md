@@ -4,6 +4,18 @@
 > 状态：**方案 + 契约定稿（Go-ready v2），代码尚未改动**。Codex 审 14 条契约补全（2026-07-18）。
 > 触发场景：手机+电脑同时开 HAPI，两端交替操作（电脑看、手机语音输入），靠红点逐个处理 session，期望两端位置对齐、不插队、不跑顶。
 
+> **实现状态（2026-07-19，commit 1c93dcb）— 与 spec v2 的偏离（实测为准）**
+>
+> §4.3 的 locator（`fetchLocatedWindow` 按 messageId 加载窗口）+ §4.3 `fetchNewerMessages` 的 **web 前端** 在浏览器 reload 下实测不稳：reporter 的 keepalive POST（pagehide 上报 hub lastRead）与 reload 的 GET-session 有 race，加上 content（markdown/code/font）reflow 的 layout 时序，使每次 reload 落点偏 1 条 message（e2e 反复复现）。hub 侧 locator/getMessagesAfterPage 代码保留（未删），仅 web 前端砍。
+>
+> 实际落地的 §4.3"看过的 session 切回不跑顶"机制：**hydrate（sessionStorage messages）+ saved restore（chat-scroll-store localStorage）+ 有界校验**（`HappyThread.verifySavedRestore`：restore 命中后，后续 ResizeObserver tick 比对 anchor 实际 offset vs saved topOffset，drift 则重 scroll，直到 2 stable tick / 6 tick / 1.5s；用户 scroll 取消）。Playwright e2e（真浏览器）验 reload 落回精确位置通过。Codex 诊断 + 方案。
+>
+> §4.5 跨端同步（hub lastRead 共享 + reporter 上报）：reporter 上报（§4.5(f)）仍按 spec（fully-visible agent，`captureReadPositionAnchor`），hub 存（migration 11 + LWW CAS + SSE `session-read-position`）保留；但 **web 前端 reload 不再消费 hub lastRead 作 locator target**（砍），跨端"手机落电脑水位"未实现。单设备场景（spec 触发场景的双端）目前不满足。
+>
+> §4.1 红点 / §4.2 排序按 spec 实现未变。
+>
+> 跨端同步后续若要恢复，需先解：(1) reporter POST / reload GET race（让 hub lastRead 在 reload 时可信，或 saved 优先不依赖 hub）；(2) locator target scroll 的 reload layout 时序（有界校验延伸到 locator target，或 locator 落 topOffset=0 + 校验）。
+
 ---
 
 ## Goal Contract（Go-ready；拆 Goal A / Goal B）
