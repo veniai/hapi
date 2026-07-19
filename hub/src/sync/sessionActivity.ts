@@ -66,16 +66,15 @@ export function isAgentResultContent(content: unknown): boolean {
     return isReadyEventContent(message.content)
 }
 
-/** Count pending permission/input requests on a raw (unvalidated) agentState
- *  blob. Used to detect the empty→non-empty transition that raises attention
- *  (§4.1 permission/input request). Returns 0 for anything malformed. */
-export function countPendingRequests(agentState: unknown): number {
+/** Read permission/input request identities from a raw agentState blob. Used
+ *  to detect additions and replacements that raise attention (§4.1). */
+export function getPendingRequestIds(agentState: unknown): Set<string> {
     if (!agentState || typeof agentState !== 'object' || Array.isArray(agentState)) {
-        return 0
+        return new Set()
     }
     const requests = (agentState as { requests?: unknown }).requests
     if (!requests || typeof requests !== 'object' || Array.isArray(requests)) {
-        return 0
+        return new Set()
     }
-    return Object.keys(requests as Record<string, unknown>).length
+    return new Set(Object.keys(requests as Record<string, unknown>))
 }

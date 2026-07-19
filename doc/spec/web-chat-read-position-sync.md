@@ -2,7 +2,7 @@
 
 > 项目：`veniai/hapi` fork
 > 基线：`work/current`，2026-07-19
-> 状态：**G1–G4 已实现并过机械门；Goal B live 部署已完成（deploy `07fde56`，migration v11→v12 已上 live 并验证：user_version=12、integrity ok、存量 session 回填 rev=0、/health 200、公网 200）。hapi-runner restart deferred（自中断 + 非本功能必需）。§9.2 双 context live e2e 与 §13 human-acceptance 待人在真实设备上验。详见 §14。**
+> 状态：**v12 基础版本已部署；2026-07-19 corrective patch 已修复审查发现的红点、未读锚点、精确恢复与连续阅读偏差，全量机械门通过，已达到 routine deploy 条件。真实双端验收仍待完成。详见 §14。**
 > 取代：`Web 双端红点与阅读位置 - Go-ready v2`
 > 触发场景：电脑与手机交替查看、回复多个并行 session；红点用于协同处理，聊天进入后从上次阅读边界继续向下读。
 
@@ -438,25 +438,23 @@ bun run build:web
 
 ### G1 — 红点 revision 模型 + 发送两端灭（§2.1 / §3.1 / §4）
 
-**已实现并通过机械门**（`work/current`，2026-07-19）：
+**v12 基础实现已部署；corrective patch 已实现、待全量门**（`work/current`，2026-07-19）：
 
 - **Hub**：migration v11→v12 加 `attention_rev` + `handled_rev`（idempotent）。`bumpAttentionRev` / `advanceHandledRev`（atomic，后者幂等）。`sessionCache.bumpAttention` / `advanceHandled` 更新缓存 + 发 `session-updated {attentionRev|handledRev}`。
 - **bump 点**（§4.1）：agent `ready` 事件（`isAgentResultContent`，非 chunk、非 user）→ unread；`update-state` requests 空→非空 → permission/input；`applyBackgroundTaskDelta` 0→N → background。**不**在 user send / chunk / metadata / 心跳上 bump（§4.1）。
-- **send → 两端灭**（§3.1.4）：`syncEngine.sendMessage` 在 `messageService.sendMessage` 成功后 `advanceHandled`（§3.1.5：失败 throw 即不 advance）。
+- **send → 两端灭**（§3.1.4）：发送开始前捕获 observed revision；成功后只推进到该 revision。发送期间到达的新 attention 保持亮。未来 scheduled 创建不清，真正成熟投递时才清；失败不清。
 - **Web**：`sessionLastSeen` v2 key 存 per-device `seenRev`（不再存 updatedAt ms）。`classifySessionAttention` 拆 `classifyAttentionKind`（纯状态）+ `isAttentionLit`（`attentionRev > max(localSeenRev, handledRev)`）。`router` 盖 `attentionRev`；`SessionList` / `PendingInboxFab` 用新 option shape；`useSSE` patch summary 合并两 rev。
 - **测试**：`migration-v12.test`（store 不变量）、`attentionRev.test`（hub 集成：ready/user/permission/background/send/idempotent/concurrency/persist，9 例）、`sessionAttention.test`（web §3.1.3–§3.1.6 全矩阵）。`bun typecheck && bun run test && bun run build:web` 全绿。`web/e2e/red-dot-send-clears-both.spec.ts`（HAPI_LIVE gated，§9.2 双 context 骨架，需 live 环境跑全）。
 
-**已知偏离 / 待确认**：
+**仍待确认**：
 
 1. **migration cut**：存量 session 两 rev 默认 0 → 部署后存量红点清空，直到下一个 attention 事件 bump。一次性迁移现象，符合新模型（旧 updatedAt-based 红点本就不该信）。
 2. **unread 信号**：用 agent `ready` 事件（turn 完成）作 bump，沿用旧 updatedAt 路径已用的过滤（`shouldRecordSessionActivity` 对 agent 只认 ready）。若某 agent flavor 不发 ready 事件，其 unread 可能不 bump —— 与旧逻辑等价，非回归。background bump 在 0→N（启动）而非完成，对齐旧 UX（任务跑着就亮）。
-3. **Goal B 待人批**：含 migration v12，live 部署需显式批准（standing auth 不预授权 migration）。部署前按 §10.2 验 deploy HEAD == target SHA + `user_version` 10→12 + integrity_check。
+3. corrective patch 不改 `SCHEMA_VERSION`（仍为 12），全量门通过后按 routine standing authorization 部署。
 
 ### G2 — 未读起点（§2.3 / §5.1）
 
-**已实现**：hub 在 `bumpAttention` 带 `messageId`（agent ready 事件的消息 id）时，cache-only 记 `lastAttentionMessageId`（不入库，重启清空——可接受，重启后 web 走 saved/hub 锚点或 latest）。web entry（`router.tsx`）target 取 `saved ?? hub ?? (hasUnreadAttention ? lastAttentionMessageId : null)`——无锚点 + 有红点时落未读起点，不跳 latest。测试：`attentionRev.test.ts` 加「records the unread-start message id」一例。hub 535/web 1320 全绿。
-
-**已知偏离**：`lastAttentionMessageId` 是 agent ready 事件消息（§2.3 偏好「触发本轮的 user 消息」——取 ready 事件而非其前的 user msg，是务实折中，落地结果边界、向下读）。hub 重启后丢失 → 该窄场景退化为 latest。
+**corrective patch 已修复**：不再使用不可见的 agent ready-event ID，也不再依赖 cache-only map。Hub 从持久消息表取最近一条 top-level user turn，生成可见 `user-text:<id>` 锚点；`refreshSession` 可在 Hub 重启后重建。Web 按 LWW(saved/hub) → unread-start → latest 选择，缓存已含目标时不再发 locator 请求。
 
 ### G3 — 单一进入事务 + LWW 目标选择（§3.2.7 / §5.1 / §8.2）
 
@@ -473,13 +471,14 @@ bun run build:web
 
 ### G5 — 性能门 + 双 context e2e（§7 / §9.2）
 
-**代码层 §7 自审（无回归，多项改善）**：
+**代码层 §7 corrective 自审**：
 - §7.1 read-position POST 非阻塞：reporter `fetch(keepalive)` fire-and-forget，不卡路由。✓
 - §7.2 已缓存窗口切换不新增阻塞：G3 砍掉自动 fetchLatest effect（净减一个请求）。✓
 - §7.3 未缓存首屏只一条目标窗口请求：loadInitial 单 owner，无 latest+locate 并行（G3）。✓
 - §7.4 红点不遍历历史：rev 模型 O(1) 整数比较/会话，不扫消息。✓
 - §7.5 不按 token 频率重渲染：rev 变更低频（per attention 事件，非 per token），走既有节流 SSE patch。✓
-- §7.6 无多轮 setTimeout/无限 ResizeObserver/无界 load-until-found：locator 重试有界（RESTORE_VERIFY_MAX_TICKS=6、locatorTargetRetries≤20）。✓
+- §7.6 已删除“新消息 → 绝对滚底”的 5 秒 deadline + 4 timer fan-out；继续阅读只前进到下一条已加载消息或下一页第一条新消息。locator/reflow 重试仍有界。✓
+- newer 下沿用 `IntersectionObserver` 提前一页预取；单次 approach 只触发一页，加载期间互斥，并用可见锚点恢复，不串行拉到最新。✓
 
 **待 live 环境执行（§7.7/§7.8 + §9.2）**：
 - §7.7 Playwright trace 基线 vs 目标 commit 对比 + §7.8 记录设备/viewport/缓存/规模/commit —— 需 live hub+web。`bun run dev` 撞 prod 3006/5173，须先停 prod 或用 alt port。
@@ -499,12 +498,18 @@ bun run build:web
 - **执行**：restart `hapi-hub`（migration v11→v12 跑）→ restart `hapi-web`（新 dist）。
 - **验证**：`user_version` 11→**12** ✓ · `integrity_check` ok ✓ · sessions 表有 `attention_rev`/`handled_rev` ✓ · 存量 18 session 回填 `rev=0`（migration cut，符合新模型）✓ · `/health` 200 ✓ · `hapi.zhetengde.xyz` 200 ✓。
 - **hapi-runner restart deferred**：本 agent 会话由 hapi-runner 托管（`ps` ancestry 验证），restart 会自中断；且本功能 CLI 红点无关、shared 字段 `.optional()` 向后兼容（旧 CLI strip 新字段不破），故 runner 留旧码安全。要换新码可在方便时人手 restart `hapi-runner`。
-- **回滚可用**：DB 快照在；若 live 发现问题 → `git -C deploy reset --hard 5e1e9e8` + restart hub/web（+ 视情况 DB restore，人批）。
+- **历史回滚约束**：`5e1e9e8` 是 schema 11 代码，不能直接运行在 schema 12 DB 上。若退到该 commit，必须恢复匹配的 v11 DB 快照；DB restore 会丢失快照后的写入，必须先获人工批准。routine corrective patch 回滚只能退到 schema 12 的 last-good `07fde56`，无需 DB restore。
+
+### Corrective patch（2026-07-19，当前）
+
+- selected session 的 attention 更新不再自动推进本端 seen；仅实际 route entry 或明确 row click 清本端。
+- handled revision 使用发送前捕获值做有界推进；并发新 attention 不误灭。
+- scheduled 创建/成熟清除时机已纠正；permission request 以 ID 集合增量检测，覆盖替换请求。
+- saved winner 保留像素 offset；hub/unread winner 才按 top 定位；缓存命中跳过 locator API。
+- 新消息/继续阅读不滚底；逐段定位 + newer 邻近下沿单页预取；移除 pending-bottom timer 状态机。
+- schema 无变化（12 → 12）。全量 typecheck/test/build:web 已通过；corrective commit、routine redeploy 和 §13 真实设备验收待完成。
 
 ### 仍待人（§9.2 live + §13）
 
-- §9.2 双 context live e2e（红点是数据驱动，逻辑层已覆盖；live 验 SSE 收敛是锦上添花）。
+- §9.2 双 context live e2e（必须验证 SSE 到两端的真实收敛；逻辑层测试不能替代）。
 - §13 Human Acceptance Checklist（真实电脑+手机工作流，只能人验）。live 已部署，可直接在 hapi.zhetengde.xyz 验。
-
-
-

@@ -66,9 +66,9 @@ export class SessionStore {
         return bumpAttentionRev(this.db, id, namespace)
     }
 
-    /** @see advanceHandledRev — set handled_rev = attention_rev; idempotent. */
-    advanceHandledRev(id: string, namespace: string): { attentionRev: number; changed: boolean } | null {
-        return advanceHandledRev(this.db, id, namespace)
+    /** @see advanceHandledRev — advance through the revision observed by send. */
+    advanceHandledRev(id: string, namespace: string, handledThroughRev: number): { handledRev: number; changed: boolean } | null {
+        return advanceHandledRev(this.db, id, namespace, handledThroughRev)
     }
 
     setSessionTodos(id: string, todos: unknown, todosUpdatedAt: number, namespace: string): boolean {

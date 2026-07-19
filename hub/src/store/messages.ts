@@ -186,6 +186,26 @@ export function getFirstMessages(
     return rows.map(toStoredMessage)
 }
 
+/** Most recent real user message for a session. System-injected user-shaped
+ * payloads are wrapped by an agent envelope, so matching the top-level role
+ * selects the durable user turn that should anchor the next unread result. */
+export function getLatestUserMessage(
+    db: Database,
+    sessionId: string,
+    now: number = Date.now()
+): StoredMessage | null {
+    const row = db.prepare(`
+        SELECT * FROM messages
+        WHERE session_id = ?
+          AND json_extract(content, '$.role') = 'user'
+          AND (scheduled_at IS NULL OR scheduled_at <= ?)
+        ORDER BY seq DESC
+        LIMIT 1
+    `).get(sessionId, now) as DbMessageRow | undefined
+
+    return row ? toStoredMessage(row) : null
+}
+
 /** CLI reconnect backfill: returns messages above the seq cursor that are
  *  deliverable now, i.e. excludes future-scheduled rows (scheduled_at > now).
  *  Without this filter, a CLI reconnect between schedule time and release time

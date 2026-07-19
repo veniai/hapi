@@ -14,6 +14,22 @@ export type EntryTargetSource = 'saved' | 'hub' | 'unread'
 
 export type EntryTarget = { target: string | null; source: EntryTargetSource | null }
 
+export function isOptimisticEntryTarget(target: string): boolean {
+    return target.split(':').some((part) => part.startsWith('__optimistic__'))
+}
+
+export function shouldMarkSessionEntry(input: {
+    selectedSessionId: string | null
+    markedSessionId: string | null
+    sessionLoaded: boolean
+    tabVisible: boolean
+}): boolean {
+    return input.selectedSessionId !== null
+        && input.sessionLoaded
+        && input.tabVisible
+        && input.markedSessionId !== input.selectedSessionId
+}
+
 export type PickEntryTargetInput = {
     savedMessageId: string | null
     /** Local clock at which the saved anchor was captured. -Infinity / undefined

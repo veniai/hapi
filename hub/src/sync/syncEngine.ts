@@ -489,12 +489,10 @@ export class SyncEngine {
         this.sessionCache.applyBackgroundTaskDelta(sessionId, delta)
     }
 
-    /** Raise the session's attention revision (§2.1/§4.1). Wired to the CLI
-     *  socket handlers' `onAttentionBump` — fires on agent-result content and
-     *  on a permission/input request appearing. `messageId` (when known) is
-     *  recorded as the unread-start hint (§2.3). */
-    bumpAttention(sessionId: string, messageId?: string): number | null {
-        return this.sessionCache.bumpAttention(sessionId, messageId !== undefined ? { messageId } : undefined)
+    /** Raise the session's attention revision (§2.1/§4.1). The cache derives
+     *  the unread-start hint from the latest durable user turn. */
+    bumpAttention(sessionId: string): number | null {
+        return this.sessionCache.bumpAttention(sessionId)
     }
 
     recordSessionActivity(sessionId: string, updatedAt: number): void {
@@ -519,7 +517,11 @@ export class SyncEngine {
         this.machineCache.expireInactive()
         // Piggybacked on the inactivity tick; not a logical part of expireInactive
         // but shares its 5s cadence (avoids a second timer).
-        this.messageService.releaseMatureScheduledMessages(Date.now())
+        const maturedSessionIds = this.messageService.releaseMatureScheduledMessages(Date.now())
+        for (const sessionId of maturedSessionIds) {
+            const observedAttentionRev = this.sessionCache.getSession(sessionId)?.attentionRev ?? 0
+            this.sessionCache.advanceHandled(sessionId, observedAttentionRev)
+        }
     }
 
     private reloadAll(): void {
@@ -570,14 +572,17 @@ export class SyncEngine {
             scheduledAt?: number | null
         }
     ): Promise<void> {
-        await this.messageService.sendMessage(sessionId, payload)
+        const observedAttentionRev = this.sessionCache.getSession(sessionId)?.attentionRev ?? 0
+        const outcome = await this.messageService.sendMessage(sessionId, payload)
         this.sessionCache.markMessageQueued(sessionId)
         this.sessionCache.recordSessionActivity(sessionId, Date.now())
         // §3.1.4: a successful send marks everything observed up to now as
         // globally handled, clearing the red dot on ALL devices. Runs only on
         // success — messageService.sendMessage throws on persist failure, so
         // reaching here means the user message is durable (§3.1.5).
-        this.sessionCache.advanceHandled(sessionId)
+        if (!outcome.scheduledForFuture) {
+            this.sessionCache.advanceHandled(sessionId, observedAttentionRev)
+        }
     }
 
     async cancelQueuedMessage(

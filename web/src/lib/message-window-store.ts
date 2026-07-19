@@ -920,6 +920,15 @@ export function getMessageWindowState(sessionId: string): MessageWindowState {
     return getState(sessionId)
 }
 
+/** True when the cached window already contains the DB row behind a raw or
+ * composite DOM message id (`user-text:<uuid>`, `agent-text:<uuid>:0`, ...). */
+export function messageWindowContainsTarget(sessionId: string, targetMessageId: string): boolean {
+    const targetParts = new Set(targetMessageId.split(':'))
+    return getState(sessionId).messages.some((message) =>
+        message.id === targetMessageId || targetParts.has(message.id)
+    )
+}
+
 export function subscribeMessageWindow(sessionId: string, listener: () => void): () => void {
     const subs = listeners.get(sessionId) ?? new Set()
     subs.add(listener)

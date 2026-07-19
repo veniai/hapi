@@ -57,13 +57,13 @@ describe('migration v11 → v12 (attention_rev + handled_rev)', () => {
         store.sessions.bumpAttentionRev(session.id, ns)
         store.sessions.bumpAttentionRev(session.id, ns)
 
-        const advanced = store.sessions.advanceHandledRev(session.id, ns)
-        expect(advanced?.attentionRev).toBe(2)
+        const advanced = store.sessions.advanceHandledRev(session.id, ns, 2)
+        expect(advanced?.handledRev).toBe(2)
         expect(advanced?.changed).toBe(true)
 
         // Second advance with no new attention → no-op.
-        const idempotent = store.sessions.advanceHandledRev(session.id, ns)
-        expect(idempotent?.attentionRev).toBe(2)
+        const idempotent = store.sessions.advanceHandledRev(session.id, ns, 2)
+        expect(idempotent?.handledRev).toBe(2)
         expect(idempotent?.changed).toBe(false)
         store.close()
     })
@@ -74,7 +74,7 @@ describe('migration v11 → v12 (attention_rev + handled_rev)', () => {
         const session = store.sessions.getOrCreateSession('tag', { path: '', host: '' }, null, ns)
         // Attention event + send (handled catches up) → invariant equal, no dot.
         store.sessions.bumpAttentionRev(session.id, ns)
-        store.sessions.advanceHandledRev(session.id, ns)
+        store.sessions.advanceHandledRev(session.id, ns, 1)
         let after = store.sessions.getSession(session.id)!
         expect(after.attentionRev).toBe(after.handledRev)
 
