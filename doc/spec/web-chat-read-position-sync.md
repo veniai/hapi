@@ -2,7 +2,7 @@
 
 > 项目：`veniai/hapi` fork
 > 基线：`work/current`，2026-07-19
-> 状态：**G1–G4 已实现并过机械门（commit 714ea1a/164cbb3/694f460/be16b35）；G5 代码层自审完成，live 性能证据 + 双 context e2e 执行 + §13 human-acceptance + Goal B live 部署（migration v12）待人介入。详见 §14。**
+> 状态：**G1–G4 已实现并过机械门；Goal B live 部署已完成（deploy `07fde56`，migration v11→v12 已上 live 并验证：user_version=12、integrity ok、存量 session 回填 rev=0、/health 200、公网 200）。hapi-runner restart deferred（自中断 + 非本功能必需）。§9.2 双 context live e2e 与 §13 human-acceptance 待人在真实设备上验。详见 §14。**
 > 取代：`Web 双端红点与阅读位置 - Go-ready v2`
 > 触发场景：电脑与手机交替查看、回复多个并行 session；红点用于协同处理，聊天进入后从上次阅读边界继续向下读。
 
@@ -489,6 +489,22 @@ bun run build:web
   HAPI_LIVE=1 HAPI_URL=http://127.0.0.1:3007 SESSION_ID=<一个 lit 的 session> \
     bunx playwright test --config=web/playwright.live.config.ts web/e2e/red-dot-send-clears-both.spec.ts
   ```
-  逻辑层（rev 状态机两端灭/点击单端灭/并发不误灭）已由 hub `attentionRev.test`（9 例）+ web `sessionAttention.test`（§3.1.3–§3.1.6 矩阵）覆盖；live e2e 验 SSE→浏览器收敛。
+  逻辑层（rev 状态机两端灭/点击单端灭/并发不误灭）已由 hub `attentionRev.test`（9 例）+ web `sessionAttention.test`（§3.1.3–§3.1.6 矩阵）+ `session-summary-patch.test`（SSE→summary→红点链路）覆盖；live e2e 验 SSE→浏览器收敛。
+
+### Goal B — live 部署（已完成，2026-07-19）
+
+- **migration 判定**：SCHEMA_VERSION 11→12 → 是 migration → 人显式 grant（"Go，部署"）→ 执行。
+- **promotion**：`cd /home/claw/deploy/hapi && git merge --ff-only work/current` → deploy HEAD `07fde56`（== authorized target，ff-only，无 merge commit）。
+- **DB 快照**：`~/.hapi/hapi.db.pre-deploy-g1-deploy-20260719-183338`（v11, integrity ok, restorable），脚本 `/tmp/hapi-snapshot.ts`（VACUUM INTO，WAL-safe）。
+- **执行**：restart `hapi-hub`（migration v11→v12 跑）→ restart `hapi-web`（新 dist）。
+- **验证**：`user_version` 11→**12** ✓ · `integrity_check` ok ✓ · sessions 表有 `attention_rev`/`handled_rev` ✓ · 存量 18 session 回填 `rev=0`（migration cut，符合新模型）✓ · `/health` 200 ✓ · `hapi.zhetengde.xyz` 200 ✓。
+- **hapi-runner restart deferred**：本 agent 会话由 hapi-runner 托管（`ps` ancestry 验证），restart 会自中断；且本功能 CLI 红点无关、shared 字段 `.optional()` 向后兼容（旧 CLI strip 新字段不破），故 runner 留旧码安全。要换新码可在方便时人手 restart `hapi-runner`。
+- **回滚可用**：DB 快照在；若 live 发现问题 → `git -C deploy reset --hard 5e1e9e8` + restart hub/web（+ 视情况 DB restore，人批）。
+
+### 仍待人（§9.2 live + §13）
+
+- §9.2 双 context live e2e（红点是数据驱动，逻辑层已覆盖；live 验 SSE 收敛是锦上添花）。
+- §13 Human Acceptance Checklist（真实电脑+手机工作流，只能人验）。live 已部署，可直接在 hapi.zhetengde.xyz 验。
+
 
 
