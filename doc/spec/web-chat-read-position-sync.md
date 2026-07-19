@@ -458,9 +458,20 @@ bun run build:web
 
 **已知偏离**：`lastAttentionMessageId` 是 agent ready 事件消息（§2.3 偏好「触发本轮的 user 消息」——取 ready 事件而非其前的 user msg，是务实折中，落地结果边界、向下读）。hub 重启后丢失 → 该窄场景退化为 latest。
 
-### 待实现（后续 G3–G5）
+### G3 — 单一进入事务 + LWW 目标选择（§3.2.7 / §5.1 / §8.2）
 
-- **G3（§3.2.7 / §8.2 单一进入事务）**：`useMessages` 自动 `fetchLatest` effect 与 `SessionPage.loadInitial(locator)` 仍并行（`isLoading` guard 缓解未重构）；`locatorTargetMessageId` 实为 `saved ?? hub`（非 LWW，`capturedAt` 未用）。
-- **G4（§3.2.4 跨端恢复）**：hub `lastRead` 已在 entry 消费（`router.tsx:688`），但 saved-first + reporter POST/reload GET race 未根治。
-- **G5（§7 性能证据 / §9.2 双 context e2e）**：无 Playwright trace 基线对比；双 context e2e 骨架已写但需 live 环境跑全。
+**已实现**：
+- 砍掉 `useMessages` 的自动 `fetchLatest` effect（commit 68e11ca 重加的「保底」）—— 它是与 `SessionPage.loadInitial(locator)` 并行争抢窗口的根因（§8.2 MUST-refactor）。现在 `loadInitial` 是唯一窗口加载 owner（locate 或 latest fallback），`isLoading` guard 从「救命」降级为「保险」。
+- entry 目标选择抽成纯函数 `web/src/lib/read-position-target.ts` 的 `pickEntryTarget`，按 §5.1 LWW（`saved.capturedAt` vs `hub.lastReadAt`，tie/undated → saved）+ §2.3 unread-start + latest fallback。原 `saved ?? hub` saved-first 启发式替换。单测 10 例覆盖 LWW/tie/单边/undated/unread/latest 矩阵。
+- web 159 文件 / 1330 测试全绿。
+
+### G4 — 跨端恢复 + reporter/reload race（§3.2.4/§3.2.5）
+
+**由 G3 的 LWW 选择根治**（无需单独改动）：
+- **reporter POST/reload GET race**：reload 时 reporter pagehide POST（observedAt=T, msg=M）；POST 落地则 hub.lastReadAt≈T（tie→saved），未落地则 hub stale、`saved.capturedAt=T > hub.lastReadAt` → saved 胜 → 都定位到 M。两种情况都对。
+- **跨端语义恢复**：设备 B 无/旧 saved + 设备 A 的新 hub 锚点 → LWW hub 胜 → 落共享边界；B 的 saved 更新 → saved 胜。§3.2.5 不承诺像素一致（locator 落 topOffset=0）由 HappyThread locator 模式承担（既有）。
+
+### 待实现（G5）
+
+- **G5（§7 性能证据 / §9.2 双 context e2e）**：无 Playwright trace 基线 vs 目标 commit 对比；`web/e2e/red-dot-send-clears-both.spec.ts` 双 context 骨架已写但 HAPI_LIVE gated，需 live 多端环境跑全。逻辑层由 attentionRev.test + sessionAttention.test 覆盖。
 

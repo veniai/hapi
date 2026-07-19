@@ -95,12 +95,12 @@ export function useMessages(api: ApiClient | null, sessionId: string | null): {
         return false
     }, [api, sessionId])
 
-    // 冻住落位 thrash：reload/进入 总 fetchLatest（落最新），saved/locator 落位停用。
-    // read-position 临时停用（hub locator API + reporter 保留），等落位理顺再接回。
-    useEffect(() => {
-        if (!api || !sessionId) return
-        void fetchLatestMessages(api, sessionId)
-    }, [api, sessionId])
+    // §3.2.7 单一进入事务：NO auto-fetchLatest effect. SessionPage drives the
+    // sole entry load via loadInitial, which picks the target (saved/hub/unread)
+    // and loads exactly one window (locate, or latest as fallback). A parallel
+    // auto-fetchLatest here was the double-load race (commit 68e11ca re-added it
+    // as a "保底" — loadInitial's fetchLatest fallback now provides that guarantee
+    // without competing for the window).
 
     const loadMore = useCallback(async () => {
         if (!api || !sessionId) return
