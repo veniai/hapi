@@ -471,7 +471,24 @@ bun run build:web
 - **reporter POST/reload GET race**：reload 时 reporter pagehide POST（observedAt=T, msg=M）；POST 落地则 hub.lastReadAt≈T（tie→saved），未落地则 hub stale、`saved.capturedAt=T > hub.lastReadAt` → saved 胜 → 都定位到 M。两种情况都对。
 - **跨端语义恢复**：设备 B 无/旧 saved + 设备 A 的新 hub 锚点 → LWW hub 胜 → 落共享边界；B 的 saved 更新 → saved 胜。§3.2.5 不承诺像素一致（locator 落 topOffset=0）由 HappyThread locator 模式承担（既有）。
 
-### 待实现（G5）
+### G5 — 性能门 + 双 context e2e（§7 / §9.2）
 
-- **G5（§7 性能证据 / §9.2 双 context e2e）**：无 Playwright trace 基线 vs 目标 commit 对比；`web/e2e/red-dot-send-clears-both.spec.ts` 双 context 骨架已写但 HAPI_LIVE gated，需 live 多端环境跑全。逻辑层由 attentionRev.test + sessionAttention.test 覆盖。
+**代码层 §7 自审（无回归，多项改善）**：
+- §7.1 read-position POST 非阻塞：reporter `fetch(keepalive)` fire-and-forget，不卡路由。✓
+- §7.2 已缓存窗口切换不新增阻塞：G3 砍掉自动 fetchLatest effect（净减一个请求）。✓
+- §7.3 未缓存首屏只一条目标窗口请求：loadInitial 单 owner，无 latest+locate 并行（G3）。✓
+- §7.4 红点不遍历历史：rev 模型 O(1) 整数比较/会话，不扫消息。✓
+- §7.5 不按 token 频率重渲染：rev 变更低频（per attention 事件，非 per token），走既有节流 SSE patch。✓
+- §7.6 无多轮 setTimeout/无限 ResizeObserver/无界 load-until-found：locator 重试有界（RESTORE_VERIFY_MAX_TICKS=6、locatorTargetRetries≤20）。✓
+
+**待 live 环境执行（§7.7/§7.8 + §9.2）**：
+- §7.7 Playwright trace 基线 vs 目标 commit 对比 + §7.8 记录设备/viewport/缓存/规模/commit —— 需 live hub+web。`bun run dev` 撞 prod 3006/5173，须先停 prod 或用 alt port。
+- §9.2 双 context e2e：`web/e2e/red-dot-send-clears-both.spec.ts`（HAPI_LIVE gated，session 行已加 `data-session-id` hook）。运行：
+  ```bash
+  # 起 live（alt port 避开 prod）：HAPI_PORT=3007 bun run dev
+  HAPI_LIVE=1 HAPI_URL=http://127.0.0.1:3007 SESSION_ID=<一个 lit 的 session> \
+    bunx playwright test --config=web/playwright.live.config.ts web/e2e/red-dot-send-clears-both.spec.ts
+  ```
+  逻辑层（rev 状态机两端灭/点击单端灭/并发不误灭）已由 hub `attentionRev.test`（9 例）+ web `sessionAttention.test`（§3.1.3–§3.1.6 矩阵）覆盖；live e2e 验 SSE→浏览器收敛。
+
 
