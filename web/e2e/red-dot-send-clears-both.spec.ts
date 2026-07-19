@@ -39,14 +39,14 @@ test.describe('red-dot: send clears both devices', () => {
         await pageA.goto(`${baseUrl}/sessions`, { waitUntil: 'domcontentloaded' })
         await pageB.goto(`${baseUrl}/sessions`, { waitUntil: 'domcontentloaded' })
 
-        const rowSelector = `[data-session-id="${sessionId}"], a[href*="/sessions/${sessionId}"]`
+        const rowSelector = `[data-session-id="${sessionId}"]`
 
         const dotVisible = async (page: import('@playwright/test').Page) => {
-            const row = await page.locator(rowSelector).first()
-            const cls = await row.getAttribute('class').catch(() => null)
-            const text = await row.innerText().catch(() => '')
-            // Red-dot / unread signal: red title class or an attention indicator.
-            return Boolean((cls && cls.includes('text-red-500')) || text.includes('●'))
+            // The unread signal is the red title color (rev-driven) on a child
+            // of the session row. Absent → handled/cleared.
+            const row = page.locator(rowSelector).first()
+            const redCount = await row.locator('.text-red-500').count().catch(() => 0)
+            return redCount > 0
         }
 
         // Both devices should start lit (precondition).
