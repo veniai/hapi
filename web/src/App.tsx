@@ -213,7 +213,8 @@ function AppInner() {
         // Only force show banner on first connect (page load)
         // Subsequent connects (session switches) use non-forced mode
         // which only shows banner when returning from background
-        if (isFirstConnectRef.current) {
+        const isInitialConnect = isFirstConnectRef.current
+        if (isInitialConnect) {
             isFirstConnectRef.current = false
             startSync({ force: true })
         } else {
@@ -228,7 +229,10 @@ function AppInner() {
             // cached data on remount.  See tiann/hapi#884.
             queryClient.invalidateQueries({ queryKey: ['session'] })
         ]
-        const refreshMessages = (selectedSessionId && api)
+        // SessionPage owns the cold-entry window (saved/hub locator or latest).
+        // Starting fetchLatest here on first connect races that transaction and
+        // can replace the located window before it is positioned.
+        const refreshMessages = (!isInitialConnect && selectedSessionId && api)
             ? fetchLatestMessages(api, selectedSessionId)
             : Promise.resolve()
         Promise.all([...invalidations, refreshMessages])

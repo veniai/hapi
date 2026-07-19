@@ -56,6 +56,11 @@ export function pickEntryTarget(input: PickEntryTargetInput): EntryTarget {
     const hubAvailable = !!input.hubMessageId
 
     if (savedAvailable && hubAvailable) {
+        // Hub acknowledgement normally lands a few milliseconds after the
+        // local capture. The same message must retain its exact local offset.
+        if (input.savedMessageId === input.hubMessageId) {
+            return { target: input.savedMessageId, source: 'saved' }
+        }
         // §5.1.1 LWW by timestamp; tie / undated → saved (local default; on
         // reload the reporter just flushed saved, so saved is at least as new).
         return ts(input.savedCapturedAt) >= ts(input.hubLastReadAt)

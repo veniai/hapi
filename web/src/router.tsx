@@ -687,8 +687,7 @@ function SessionPage() {
 
     // locator 恢复：target = LWW(saved, hub) ?? unread-start。单一进入事务
     // （§3.2.7）：useMessages 不再有自动 fetchLatest effect，loadInitial 是唯一
-    // 窗口加载 owner（locate 或 latest fallback）。setLocatorTarget 只在 loadInitial
-    // 成功（非 busy/failed）后才设 —— busy/failed 时 HappyThread saved restore 接管。
+    // 窗口加载 owner（locate 或 latest fallback）。
     const [locatorTarget, setLocatorTarget] = useState<{ sessionId: string; messageId: string } | null>(null)
     const [positionReadySessionId, setPositionReadySessionId] = useState<string | null>(null)
     const lastLoadedRef = useRef<string | null>(null)
