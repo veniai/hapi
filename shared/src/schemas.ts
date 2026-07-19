@@ -251,7 +251,10 @@ export const ReadPositionResponseSchema = z.object({
 export type ReadPositionResponse = z.infer<typeof ReadPositionResponseSchema>
 
 export const MessageLocateQuerySchema = z.object({
-    messageId: z.string().uuid(),
+    // Web carries composite ids end-to-end (e.g. `${msg.id}:${idx}`,
+    // `agent-reasoning:<uuid>:0`). The hub store extracts the bare uuid to
+    // resolve the DB row, so accept any non-empty string here.
+    messageId: z.string().min(1),
     beforeLimit: z.number().int().min(1).max(200).optional().default(50),
     afterLimit: z.number().int().min(1).max(200).optional().default(50)
 })

@@ -413,6 +413,24 @@ describe('locateMessageWindow', () => {
         expect(win).toBeNull()
     })
 
+    it('locates by web composite id by extracting the bare uuid', () => {
+        const store = makeStore()
+        const session = makeSession(store, 'locate-composite')
+        const m = store.messages.addMessage(session.id, { role: 'user', content: { type: 'text', text: '1' } }, 'l1')
+        // Web composite forms: `${msg.id}:${idx}` and `kind:${msg.id}:${idx}`.
+        const compositeA = `${m.id}:0`
+        const compositeB = `agent-reasoning:${m.id}:0`
+
+        const winA = store.messages.locateMessageWindow(session.id, compositeA, { beforeLimit: 50, afterLimit: 50 })
+        const winB = store.messages.locateMessageWindow(session.id, compositeB, { beforeLimit: 50, afterLimit: 50 })
+
+        const expectedTarget = { at: (m.invokedAt ?? m.createdAt) as number, seq: m.seq as number }
+        expect(winA).not.toBeNull()
+        expect(winA!.target).toEqual(expectedTarget)
+        expect(winB).not.toBeNull()
+        expect(winB!.target).toEqual(expectedTarget)
+    })
+
     it('reports hasOlder/hasNewer when more messages lie beyond the limits', () => {
         const store = makeStore()
         const session = makeSession(store, 'locate-bounds')

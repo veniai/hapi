@@ -254,6 +254,16 @@ export type LocatedWindow = {
     hasNewer: boolean
 }
 
+const MESSAGE_UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
+
+/** Web composite ids look like `${msg.id}:${idx}` or `kind:${msg.id}:${idx}`
+ *  (e.g. `agent-reasoning:<uuid>:0`). The DB row id is the bare uuid, so
+ *  extract it; fall back to the raw id if no uuid is present. */
+function extractMessageUuid(id: string): string {
+    const m = id.match(MESSAGE_UUID_RE)
+    return m ? m[0] : id
+}
+
 /** Locate a window of messages around a target messageId (inclusive).
  *  Returns null if target not found or doesn't belong to session. */
 export function locateMessageWindow(
@@ -264,8 +274,9 @@ export function locateMessageWindow(
 ): LocatedWindow | null {
     const beforeLimit = Number.isFinite(options.beforeLimit) ? Math.max(1, Math.min(200, options.beforeLimit)) : 50
     const afterLimit = Number.isFinite(options.afterLimit) ? Math.max(1, Math.min(200, options.afterLimit)) : 50
+    const targetUuid = extractMessageUuid(targetMessageId)
     const targetRow = db.prepare('SELECT * FROM messages WHERE session_id = ? AND id = ?')
-        .get(sessionId, targetMessageId) as DbMessageRow | null
+        .get(sessionId, targetUuid) as DbMessageRow | null
     if (!targetRow) return null
     const targetAt = targetRow.invoked_at ?? targetRow.created_at
     const targetSeq = targetRow.seq

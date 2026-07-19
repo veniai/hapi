@@ -81,11 +81,18 @@ export function useMessages(api: ApiClient | null, sessionId: string | null): {
         if (!api || !sessionId) return
         if (targetMessageId) {
             const result = await fetchLocatedWindow(api, sessionId, targetMessageId)
-            if (!result.ok && result.reason === 'not-found') {
-                // Target vanished (deleted / cross-device race). Drop the stale
-                // saved anchor and fall back to a plain latest load.
-                clearChatScrollPosition(sessionId)
-                await fetchLatestMessages(api, sessionId)
+            if (!result.ok) {
+                if (result.reason === 'not-found') {
+                    // Target vanished (deleted / cross-device race). Drop the stale
+                    // saved anchor before falling back.
+                    clearChatScrollPosition(sessionId)
+                }
+                // not-found / failed: fall back to latest so the user isn't stuck
+                // on an empty window + "Failed to locate" warning. busy: a load is
+                // already in flight — let it land, don't double-fetch.
+                if (result.reason !== 'busy') {
+                    await fetchLatestMessages(api, sessionId)
+                }
             }
             return
         }
