@@ -736,7 +736,12 @@ export function HappyThread(props: {
         if (!viewport) return
         const el = document.getElementById(`hapi-message-${target}`)
         if (el && viewport.contains(el)) {
-            el.scrollIntoView({ block: 'start' })
+            // spec §4.3: restoreScrollAnchor (NOT scrollIntoView). topOffset 0
+            // lands the target at viewport top — cross-device hub target carries
+            // no pixel offset (§8 doesn't guarantee pixel parity). The
+            // target===saved case never reaches here (it stays in saved-restore
+            // mode, which uses saved.topOffset for pixel precision).
+            restoreScrollAnchor(viewport, { id: `hapi-message-${target}`, topOffset: 0, messageId: target })
             ignoreNextRestorationScrollRef.current = true
             lastScrollTopRef.current = viewport.scrollTop
             requestAnimationFrame(() => {
@@ -751,9 +756,12 @@ export function HappyThread(props: {
         }
         locatorTargetRetriesRef.current += 1
         if (locatorTargetRetriesRef.current > 20) {
-            // Bounded fallback: target never rendered — release target mode so
-            // default positioning (recomputeAtBottom) can settle the viewport.
+            // NB-3: target never rendered (filtered/deleted) — release target
+            // mode AND scroll to bottom so the user isn't stuck at scrollTop=0.
             locatorTargetActiveRef.current = false
+            viewport.scrollTo({ top: viewport.scrollHeight })
+            lastScrollTopRef.current = viewport.scrollTop
+            recomputeAtBottom()
         }
     }, [props.locatorTargetMessageId, props.messagesVersion, recomputeAtBottom])
 
