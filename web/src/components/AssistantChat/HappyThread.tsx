@@ -38,6 +38,12 @@ const MANUAL_SCROLL_EPSILON_PX = 1
 const SEND_SCROLL_TIMEOUT_MS = 1500
 const BOTTOM_SCROLL_TIMEOUT_MS = 5000
 const SCROLL_PERSIST_DELAY_MS = 150
+// Bounded re-verification of saved-scroll restore after a cold reload: later
+// ResizeObserver ticks re-check the anchor's offset and correct drift caused by
+// markdown/code/font reflow that hadn't settled when restoreScrollAnchor ran.
+const RESTORE_VERIFY_MAX_TICKS = 6
+const RESTORE_VERIFY_TIMEOUT_MS = 1500
+const RESTORE_VERIFY_EPSILON_PX = 1
 
 type ScrollIntent = {
     distanceFromBottom: number
@@ -388,6 +394,8 @@ export function HappyThread(props: {
     const forceScrollTokenRef = useRef(props.forceScrollToken)
     const lastScrollTopRef = useRef(0)
     const pendingSavedScrollRef = useRef<PersistedChatScrollPosition | null>(readChatScrollPosition(props.sessionId))
+    // Bounded re-verification state (see verifySavedRestore).
+    const savedRestoreVerificationRef = useRef<{ anchor: ScrollAnchor; ticksRemaining: number; stableTicks: number; deadline: number } | null>(null)
     // Initial-position target mode: when locatorTargetMessageId is set, the
     // viewport must land on it (NOT saved/bottom). Stays active until the
     // target's DOM node is scrolled into view, or bounded retries exhaust
@@ -570,6 +578,8 @@ export function HappyThread(props: {
                 ignoreNextRestorationScrollRef.current = false
                 return
             }
+            // user-driven scroll (not a restore re-anchor) — stop verifying
+            savedRestoreVerificationRef.current = null
             if (pendingSavedScrollRef.current === null) {
                 scheduleViewportPositionPersist(viewport)
             }
@@ -594,6 +604,7 @@ export function HappyThread(props: {
         }
 
         const cancelSavedRestore = () => {
+            savedRestoreVerificationRef.current = null
             ignoreNextRestorationScrollRef.current = false
             clearPendingBottomScroll()
             if (pendingSavedScrollRef.current !== null) {
@@ -649,6 +660,38 @@ export function HappyThread(props: {
         }
     }, [clearPendingBottomScroll, settlePendingLoad])
 
+    const verifySavedRestore = useCallback((): boolean => {
+        const verification = savedRestoreVerificationRef.current
+        const viewport = viewportRef.current
+        if (!verification || !viewport) return false
+        if (Date.now() > verification.deadline || verification.ticksRemaining <= 0) {
+            savedRestoreVerificationRef.current = null
+            return false
+        }
+        const target = document.getElementById(verification.anchor.id)
+        if (!target || !viewport.contains(target)) {
+            savedRestoreVerificationRef.current = null
+            return false
+        }
+        verification.ticksRemaining -= 1
+        const drift = target.getBoundingClientRect().top
+            - viewport.getBoundingClientRect().top
+            - verification.anchor.topOffset
+        if (Math.abs(drift) <= RESTORE_VERIFY_EPSILON_PX) {
+            verification.stableTicks += 1
+            if (verification.stableTicks >= 2) {
+                savedRestoreVerificationRef.current = null
+            }
+            return false
+        }
+        // drifted (content reflowed after initial restore) — re-anchor
+        verification.stableTicks = 0
+        ignoreNextRestorationScrollRef.current = true
+        viewport.scrollTop += drift
+        lastScrollTopRef.current = viewport.scrollTop
+        return true
+    }, [])
+
     const restoreSavedPosition = useCallback((): boolean => {
         // Target mode owns the initial position — saved must not override it
         // (the cross-device case where saved is stale and hub target won LWW).
@@ -662,6 +705,15 @@ export function HappyThread(props: {
             if (target && viewport.contains(target)) {
                 ignoreNextRestorationScrollRef.current = true
                 restoreScrollAnchor(viewport, saved.anchor)
+                // start bounded re-verification: cold-reload content reflow can
+                // shift the anchor after this first restore; ResizeObserver will
+                // correct drift via verifySavedRestore until stable.
+                savedRestoreVerificationRef.current = {
+                    anchor: saved.anchor,
+                    ticksRemaining: RESTORE_VERIFY_MAX_TICKS,
+                    stableTicks: 0,
+                    deadline: Date.now() + RESTORE_VERIFY_TIMEOUT_MS,
+                }
                 pendingSavedScrollRef.current = null
                 lastScrollTopRef.current = viewport.scrollTop
                 window.requestAnimationFrame(() => {
@@ -878,6 +930,7 @@ export function HappyThread(props: {
                 return
             }
             if (scrollToSentMessage()) return
+            if (verifySavedRestore()) return
             if (restoreSavedPosition()) return
             if (pendingSavedScrollRef.current?.anchor && hasMoreMessagesRef.current) {
                 void loadOlderPreservingScroll()
@@ -888,7 +941,7 @@ export function HappyThread(props: {
         })
         observer.observe(content)
         return () => observer.disconnect()
-    }, [finishPendingBottomScroll, loadOlderPreservingScroll, recomputeAtBottom, restoreSavedPosition, scrollToSentMessage])
+    }, [finishPendingBottomScroll, loadOlderPreservingScroll, recomputeAtBottom, restoreSavedPosition, scrollToSentMessage, verifySavedRestore])
 
     useLayoutEffect(() => {
         const pending = pendingScrollRef.current
@@ -909,6 +962,7 @@ export function HappyThread(props: {
             return
         }
         if (scrollToSentMessage()) return
+        if (verifySavedRestore()) return
         if (restoreSavedPosition()) return
         if (pendingSavedScrollRef.current?.anchor && hasMoreMessagesRef.current) {
             void loadOlderPreservingScroll()
