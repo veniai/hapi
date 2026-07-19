@@ -2,7 +2,7 @@
 
 > 项目：`veniai/hapi` fork
 > 基线：`work/current`，2026-07-19
-> 状态：**需求重新定稿；等待按本 Goal Contract 实现**
+> 状态：**G1–G4 已实现并过机械门（commit 714ea1a/164cbb3/694f460/be16b35）；G5 代码层自审完成，live 性能证据 + 双 context e2e 执行 + §13 human-acceptance + Goal B live 部署（migration v12）待人介入。详见 §14。**
 > 取代：`Web 双端红点与阅读位置 - Go-ready v2`
 > 触发场景：电脑与手机交替查看、回复多个并行 session；红点用于协同处理，聊天进入后从上次阅读边界继续向下读。
 
