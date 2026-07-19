@@ -44,6 +44,7 @@ import { gcChatScrollPositions, readChatScrollPosition } from '@/lib/chat-scroll
 import { clearDraftsAfterSend } from '@/lib/clearDraftsAfterSend'
 import { inactiveSessionCanResume } from '@/lib/sessionResume'
 import { markSessionSeen, getSessionLastSeenAt } from '@/lib/sessionLastSeen'
+import { pickEntryTarget } from '@/lib/read-position-target'
 import { useSessionBrowserTitle } from '@/hooks/useSessionBrowserTitle'
 import { clearCodexImportedSession, markCodexSessionsImported } from '@/lib/codexImportedSessions'
 import type { Machine, CodexDuplicateSessionGroup, CodexLocalSessionSummary } from '@/types/api'
@@ -676,10 +677,10 @@ function SessionPage() {
         fetchNewer: fetchNewerMessages,
     } = useMessages(api, sessionId)
 
-    // locator 恢复：target = saved ?? hub（saved 优先解 reporter/reload race）。
-    // useMessages fetchLatest effect（保底 messages 显示）始终跑；loadInitial 额外定位。
-    // locator: target = saved ?? hub。setLocatorTarget 只在 loadInitial 成功（非 busy/failed）
-    // 后才设 —— busy 时 saved restore 接管（跟之前"没问题"一样），避免两头空。
+    // locator 恢复：target = LWW(saved, hub) ?? unread-start。单一进入事务
+    // （§3.2.7）：useMessages 不再有自动 fetchLatest effect，loadInitial 是唯一
+    // 窗口加载 owner（locate 或 latest fallback）。setLocatorTarget 只在 loadInitial
+    // 成功（非 busy/failed）后才设 —— busy/failed 时 HappyThread saved restore 接管。
     const [locatorTarget, setLocatorTarget] = useState<{ sessionId: string; messageId: string } | null>(null)
     const lastLoadedRef = useRef<string | null>(null)
     useEffect(() => {
@@ -688,16 +689,19 @@ function SessionPage() {
         if (!session && !sessionError) return
         lastLoadedRef.current = sessionId
         const saved = readChatScrollPosition(sessionId)
-        const savedMessageId = saved?.anchor?.messageId ?? null
-        const hubMessageId = session?.lastReadMessageId ?? null
-        // §2.3 unread-start: when there is no local/shared read anchor but the
-        // session has unread attention, land at the hub's last-attention message
-        // (the most recent result) instead of jumping to latest. Falls through
-        // to latest only when there is also no attention (§2.3 final clause).
         const hasUnreadAttention = !!session
             && (session.attentionRev ?? 0) > Math.max(getSessionLastSeenAt(sessionId), session.handledRev ?? 0)
-        const unreadStartMessageId = hasUnreadAttention ? (session?.lastAttentionMessageId ?? null) : null
-        let target: string | null = savedMessageId ?? hubMessageId ?? unreadStartMessageId
+        // §5.1 entry target pick (LWW of saved vs hub, else unread-start, else
+        // latest). Centralized + unit-tested in read-position-target.ts.
+        const picked = pickEntryTarget({
+            savedMessageId: saved?.anchor?.messageId ?? null,
+            savedCapturedAt: saved?.capturedAt,
+            hubMessageId: session?.lastReadMessageId ?? null,
+            hubLastReadAt: session?.lastReadAt ?? undefined,
+            hasUnreadAttention,
+            unreadStartMessageId: session?.lastAttentionMessageId ?? null
+        })
+        let target: string | null = picked.target
         if (target?.startsWith('__optimistic__')) target = null
         let cancelled = false
         setLocatorTarget(null)
