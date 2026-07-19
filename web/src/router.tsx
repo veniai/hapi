@@ -231,8 +231,12 @@ function SessionsPage() {
         if (!isTabVisible) {
             return
         }
-        markSessionSeen(selectedSessionId, selectedSession.updatedAt)
-    }, [selectedSessionId, selectedSession?.updatedAt, isTabVisible])
+        // 规则 A (§4.2): explicit entry advances this device's seen attention
+        // revision (NOT updatedAt). The red dot is now rev-driven (§2.1), so
+        // stamping attentionRev clears the dot locally without touching other
+        // devices.
+        markSessionSeen(selectedSessionId, selectedSession.attentionRev ?? 0)
+    }, [selectedSessionId, selectedSession?.attentionRev, selectedSession?.updatedAt, isTabVisible])
     const currentCodexSessionId = selectedSession?.metadata?.flavor === 'codex'
         ? (selectedSession.metadata.agentSessionId ?? null)
         : null

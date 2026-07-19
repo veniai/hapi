@@ -74,6 +74,8 @@ function createSession(overrides: Partial<Session> = {}): Session {
         serviceTier: null,
         lastReadMessageId: null,
         lastReadAt: null,
+        attentionRev: 0,
+        handledRev: 0,
         ...overrides
     }
 }

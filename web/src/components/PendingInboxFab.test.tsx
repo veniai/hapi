@@ -44,6 +44,8 @@ function makeSession(overrides: Partial<SessionSummary> & { id: string }): Sessi
         effort: null,
         lastReadMessageId: null,
         lastReadAt: null,
+        attentionRev: 0,
+        handledRev: 0,
         ...overrides
     }
 }
@@ -51,24 +53,18 @@ function makeSession(overrides: Partial<SessionSummary> & { id: string }): Sessi
 describe('getPendingInboxSessions', () => {
     it('keeps actionable active sessions and excludes archived, selected, thinking, and background sessions', () => {
         const candidates = [
-            makeSession({ id: 'permission', pendingRequestKinds: ['permission'] }),
-            makeSession({ id: 'input', pendingRequestKinds: ['input'] }),
-            makeSession({ id: 'unread', updatedAt: 200 }),
-            makeSession({ id: 'archived', active: false, updatedAt: 200 }),
-            makeSession({ id: 'selected', pendingRequestKinds: ['permission'] }),
-            makeSession({ id: 'thinking', thinking: true, updatedAt: 200 }),
-            makeSession({ id: 'background', backgroundTaskCount: 1, updatedAt: 200 })
+            makeSession({ id: 'permission', attentionRev: 1, pendingRequestKinds: ['permission'] }),
+            makeSession({ id: 'input', attentionRev: 1, pendingRequestKinds: ['input'] }),
+            makeSession({ id: 'unread', attentionRev: 1, updatedAt: 200 }),
+            makeSession({ id: 'archived', active: false, attentionRev: 1, updatedAt: 200 }),
+            makeSession({ id: 'selected', attentionRev: 1, pendingRequestKinds: ['permission'] }),
+            makeSession({ id: 'thinking', thinking: true, attentionRev: 1, updatedAt: 200 }),
+            makeSession({ id: 'background', attentionRev: 1, backgroundTaskCount: 1, updatedAt: 200 })
         ]
 
-        const result = getPendingInboxSessions(candidates, 'selected', {
-            permission: 100,
-            input: 100,
-            unread: 100,
-            archived: 100,
-            selected: 100,
-            thinking: 100,
-            background: 100
-        })
+        // Seen revisions are 0 (unseen) for every candidate so the lit check
+        // (attentionRev > max(seenRev, handledRev)) is driven by attentionRev.
+        const result = getPendingInboxSessions(candidates, 'selected', {})
 
         expect(result.map(session => session.id)).toEqual(['permission', 'input', 'unread'])
     })
@@ -81,9 +77,9 @@ describe('PendingInboxFab', () => {
         localStorage.clear()
         localStorage.setItem('hapi-lang', 'zh-CN')
         sessions = [
-            makeSession({ id: 'first', pendingRequestKinds: ['permission'] }),
-            makeSession({ id: 'second', pendingRequestKinds: ['input'] }),
-            makeSession({ id: 'closed', active: false, pendingRequestKinds: ['permission'] })
+            makeSession({ id: 'first', attentionRev: 1, pendingRequestKinds: ['permission'] }),
+            makeSession({ id: 'second', attentionRev: 1, pendingRequestKinds: ['input'] }),
+            makeSession({ id: 'closed', active: false, attentionRev: 1, pendingRequestKinds: ['permission'] })
         ]
     })
 

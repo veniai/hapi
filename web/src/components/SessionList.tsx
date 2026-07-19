@@ -14,7 +14,7 @@ import { DEFAULT_SESSION_PREVIEW_LIMIT, useSessionPreviewLimit } from '@/hooks/u
 import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
 import { useSessionListStatusMode } from '@/hooks/useSessionListStatusMode'
 import { useShowActiveSessionsOnly } from '@/hooks/useShowActiveSessionsOnly'
-import { classifySessionAttention } from '@/lib/sessionAttention'
+import { classifySessionAttention, isAttentionLit } from '@/lib/sessionAttention'
 import { getSessionLastSeenStore } from '@/lib/sessionLastSeen'
 import { useSessionLastSeenVersion } from '@/hooks/useSessionLastSeen'
 import { getAttentionLabel, SessionAttentionIndicator } from '@/components/SessionAttentionIndicator'
@@ -578,10 +578,10 @@ function SessionItem(props: {
     api: ApiClient | null
     selected?: boolean
     showDetailedStatus?: boolean
-    lastSeenAt?: number
+    seenRev?: number
 }) {
     const { t } = useTranslation()
-    const { session: s, onSelect, showPath = true, api, selected = false, showDetailedStatus = false, lastSeenAt = 0 } = props
+    const { session: s, onSelect, showPath = true, api, selected = false, showDetailedStatus = false, seenRev = 0 } = props
     const { haptic } = usePlatform()
     const [menuOpen, setMenuOpen] = useState(false)
     const [menuAnchorPoint, setMenuAnchorPoint] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
@@ -645,7 +645,12 @@ function SessionItem(props: {
     const todoProgress = getTodoProgress(s)
     // The list owns one last-seen subscription and passes each row its value.
     // Per-row subscriptions made every watermark update rerender the whole list N times.
-    const isUnread = s.updatedAt > lastSeenAt
+    // §2.1: title-red and the attention dot are both driven by the rev model
+    // (attentionRev > max(localSeenRev, handledRev)). This replaces the old
+    // `updatedAt > lastSeenAt` time compare, which §2.1 rejects because
+    // updatedAt is bumped by metadata/sends too.
+    const attentionOptions = { localSeenRev: seenRev, handledRev: s.handledRev ?? 0 }
+    const isUnread = isAttentionLit(s, attentionOptions)
         && !s.thinking
         && !selected
         && s.metadata?.lifecycleState !== 'archived'
@@ -656,12 +661,10 @@ function SessionItem(props: {
             : 'text-[var(--app-hint)]'
     const rawAttention = useMemo(
         () => showDetailedStatus
-            ? classifySessionAttention(s, {
-                selected: false,
-                lastSeenAt
-            })
+            ? classifySessionAttention(s, attentionOptions)
             : null,
-        [s, showDetailedStatus, lastSeenAt]
+        // attentionOptions is derived from s + seenRev; depend on those directly.
+        [s, showDetailedStatus, seenRev]
     )
     // 当前 session 也画红点（用户发消息后 agent 回复了但没滚到底 → 红点提示"有新"）
     const attention = rawAttention
@@ -1148,7 +1151,7 @@ export function SessionList(props: {
                                                                 api={api}
                                                                 selected={s.id === selectedSessionId}
                                                                 showDetailedStatus={showDetailedStatus}
-                                                                lastSeenAt={lastSeenBySession[s.id] ?? 0}
+                                                                seenRev={lastSeenBySession[s.id] ?? 0}
                                                             />
                                                         ))}
                                                         {!isSearching && group.sessions.length > sessionPreviewLimit && (hiddenSessionCount > 0 || canCollapseSessions) ? (

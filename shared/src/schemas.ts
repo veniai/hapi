@@ -230,7 +230,14 @@ export const SessionSchema = z.object({
     permissionMode: PermissionModeSchema.optional(),
     collaborationMode: CodexCollaborationModeSchema.optional(),
     lastReadMessageId: z.string().nullable().optional(),
-    lastReadAt: z.number().nullable().optional()
+    lastReadAt: z.number().nullable().optional(),
+    // web-chat-read-position-sync §2.1: monotonic attention revision (bumps on
+    // attention-worthy events) + shared handled revision (advances on send).
+    // Optional to match the lastRead* convention — the hub always populates
+    // them (migration v12 backfills 0) and the summary shapes them as required
+    // numbers; consumers read defensively (?? 0).
+    attentionRev: z.number().optional(),
+    handledRev: z.number().optional()
 })
 
 export type Session = z.infer<typeof SessionSchema>
@@ -280,7 +287,9 @@ export const SessionPatchSchema = z.object({
     serviceTier: z.string().nullable().optional(),
     permissionMode: PermissionModeSchema.optional(),
     collaborationMode: CodexCollaborationModeSchema.optional(),
-    backgroundTaskCount: z.number().optional()
+    backgroundTaskCount: z.number().optional(),
+    attentionRev: z.number().optional(),
+    handledRev: z.number().optional()
 }).strict()
 
 export type SessionPatch = z.infer<typeof SessionPatchSchema>

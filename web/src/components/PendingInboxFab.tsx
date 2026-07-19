@@ -24,8 +24,8 @@ export function getPendingInboxSessions(
             return false
         }
         const attention = classifySessionAttention(session, {
-            selected: false,
-            lastSeenAt: lastSeenBySession[session.id] ?? 0
+            localSeenRev: lastSeenBySession[session.id] ?? 0,
+            handledRev: session.handledRev ?? 0
         })
         return attention !== null && PENDING_KINDS.has(attention.kind)
     })

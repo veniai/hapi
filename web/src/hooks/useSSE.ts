@@ -340,6 +340,11 @@ export function useSSE(options: {
                     backgroundTaskCount: Object.prototype.hasOwnProperty.call(patch, 'backgroundTaskCount')
                         ? patch.backgroundTaskCount ?? 0
                         : current.backgroundTaskCount,
+                    // §2.1 red-dot revisions: fall back to the cached value, then 0,
+                    // so a patch carrying only one of them (or an older cached
+                    // summary without the field) never produces undefined.
+                    attentionRev: patch.attentionRev ?? current.attentionRev ?? 0,
+                    handledRev: patch.handledRev ?? current.handledRev ?? 0,
                     model: Object.prototype.hasOwnProperty.call(patch, 'model') ? patch.model ?? null : current.model,
                     effort: Object.prototype.hasOwnProperty.call(patch, 'effort') ? patch.effort ?? null : current.effort
                 }

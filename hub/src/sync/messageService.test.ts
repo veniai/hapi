@@ -54,6 +54,8 @@ function toProtocolSession(session: ReturnType<typeof makeSession>): Session {
         collaborationMode: 'default',
         lastReadMessageId: null,
         lastReadAt: null,
+        attentionRev: 0,
+        handledRev: 0,
     }
 }
 

@@ -489,6 +489,13 @@ export class SyncEngine {
         this.sessionCache.applyBackgroundTaskDelta(sessionId, delta)
     }
 
+    /** Raise the session's attention revision (§2.1/§4.1). Wired to the CLI
+     *  socket handlers' `onAttentionBump` — fires on agent-result content and
+     *  on a permission/input request appearing. */
+    bumpAttention(sessionId: string): number | null {
+        return this.sessionCache.bumpAttention(sessionId)
+    }
+
     recordSessionActivity(sessionId: string, updatedAt: number): void {
         this.sessionCache.recordSessionActivity(sessionId, updatedAt)
     }
@@ -565,6 +572,11 @@ export class SyncEngine {
         await this.messageService.sendMessage(sessionId, payload)
         this.sessionCache.markMessageQueued(sessionId)
         this.sessionCache.recordSessionActivity(sessionId, Date.now())
+        // §3.1.4: a successful send marks everything observed up to now as
+        // globally handled, clearing the red dot on ALL devices. Runs only on
+        // success — messageService.sendMessage throws on persist failure, so
+        // reaching here means the user message is durable (§3.1.5).
+        this.sessionCache.advanceHandled(sessionId)
     }
 
     async cancelQueuedMessage(

@@ -27,6 +27,8 @@ function makeSession(overrides: Partial<SessionSummary> & { id: string }): Sessi
         effort: null,
         lastReadMessageId: null,
         lastReadAt: null,
+        attentionRev: 0,
+        handledRev: 0,
         ...overrides
     }
 }
@@ -158,6 +160,7 @@ describe('SessionList collapse behavior', () => {
             makeSession({
                 id: 'unread',
                 active: true,
+                attentionRev: 1,
                 updatedAt: 200,
                 metadata: { path: '/work/hapi', name: 'Unread task', flavor: 'codex' },
             }),
