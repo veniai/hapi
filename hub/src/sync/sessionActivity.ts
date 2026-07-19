@@ -36,6 +36,14 @@ function isReadyEventContent(content: unknown): boolean {
     return data?.type === 'ready'
 }
 
+/** True when an already-unwrapped message is an agent turn-result (a `ready`
+ *  event). The single definition of "agent ready event" — both
+ *  shouldRecordSessionActivity (agent branch) and isAgentResultContent delegate
+ *  here so the two cannot drift apart. */
+function isAgentReadyEvent(message: { role: string; content: unknown }): boolean {
+    return message.role === 'agent' && isReadyEventContent(message.content)
+}
+
 export function shouldRecordSessionActivity(content: unknown): boolean {
     const message = unwrapRoleWrappedRecordEnvelope(content)
     if (!message) {
@@ -46,11 +54,7 @@ export function shouldRecordSessionActivity(content: unknown): boolean {
         return hasHumanTextContent(message.content)
     }
 
-    if (message.role !== 'agent') {
-        return false
-    }
-
-    return isReadyEventContent(message.content)
+    return isAgentReadyEvent(message)
 }
 
 /** True only for agent content that completes a turn needing user handling (a
@@ -60,10 +64,7 @@ export function shouldRecordSessionActivity(content: unknown): boolean {
  *  (§4.1 / §3.1.8), so the red-dot bump uses this stricter agent-only check. */
 export function isAgentResultContent(content: unknown): boolean {
     const message = unwrapRoleWrappedRecordEnvelope(content)
-    if (!message || message.role !== 'agent') {
-        return false
-    }
-    return isReadyEventContent(message.content)
+    return message ? isAgentReadyEvent(message) : false
 }
 
 /** Read permission/input request identities from a raw agentState blob. Used

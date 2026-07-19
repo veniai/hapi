@@ -396,7 +396,10 @@ export class SessionCache {
                 type: 'session-updated',
                 sessionId,
                 namespace: session.namespace,
-                data: { attentionRev: nextRev } satisfies SessionPatch
+                data: {
+                    attentionRev: nextRev,
+                    lastAttentionMessageId: session.lastAttentionMessageId
+                } satisfies SessionPatch
             })
         }
         return nextRev
