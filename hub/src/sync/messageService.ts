@@ -486,7 +486,7 @@ export class MessageService {
             sentFrom?: 'telegram-bot' | 'webapp'
             scheduledAt?: number | null
         }
-    ): Promise<void> {
+    ): Promise<{ scheduledForFuture: boolean }> {
         // Defence-in-depth invariant for non-REST callers (Telegram bot, MCP,
         // internal callers).  Attachment paths live under the CLI session's
         // upload directory which `cleanupUploadDir` purges on session end; a
@@ -562,6 +562,7 @@ export class MessageService {
                 scheduledAt: msg.scheduledAt
             }
         })
+        return { scheduledForFuture: isFutureScheduled }
     }
 
     /**
@@ -610,7 +611,7 @@ export class MessageService {
      * preserved).  Web client surfaces this as 'sent' in the thread.
      * See messageService.test.ts "cancel × mature race" for the documented
      * expected behaviour. */
-    releaseMatureScheduledMessages(now: number): void {
+    releaseMatureScheduledMessages(now: number): Set<string> {
         const mature = this.store.messages.getMatureScheduledMessages(now)
         const maturedSessionIds = new Set<string>()
         for (const msg of mature) {
@@ -642,5 +643,6 @@ export class MessageService {
         for (const sessionId of maturedSessionIds) {
             this.publisher.emit({ type: 'scheduled-matured', sessionId })
         }
+        return maturedSessionIds
     }
 }

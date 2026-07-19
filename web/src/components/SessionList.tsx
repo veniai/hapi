@@ -15,7 +15,7 @@ import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
 import { useSessionListStatusMode } from '@/hooks/useSessionListStatusMode'
 import { useShowActiveSessionsOnly } from '@/hooks/useShowActiveSessionsOnly'
 import { classifySessionAttention, isAttentionLit } from '@/lib/sessionAttention'
-import { getSessionLastSeenStore } from '@/lib/sessionLastSeen'
+import { getSessionLastSeenStore, markSessionSeen } from '@/lib/sessionLastSeen'
 import { useSessionLastSeenVersion } from '@/hooks/useSessionLastSeen'
 import { getAttentionLabel, SessionAttentionIndicator } from '@/components/SessionAttentionIndicator'
 import { HoverTooltip, SESSION_ROW_TOOLTIP_FOCUS_CLASS, useSessionRowTooltipIds } from '@/components/HoverTooltip'
@@ -634,6 +634,9 @@ function SessionItem(props: {
         },
         onClick: () => {
             if (!menuOpen) {
+                // An explicit row click is rule A, including re-clicking the
+                // currently selected row after it gained a new attention rev.
+                markSessionSeen(s.id, s.attentionRev ?? 0)
                 onSelect(s.id)
             }
         },

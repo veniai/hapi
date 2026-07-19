@@ -9,6 +9,45 @@ function makeSession(store: Store, tag: string) {
     return store.sessions.getOrCreateSession(tag, { path: `/tmp/${tag}` }, null, 'default')
 }
 
+describe('getLatestUserMessage', () => {
+    it('returns the latest durable top-level user turn', () => {
+        const store = makeStore()
+        const session = makeSession(store, 'latest-user')
+        const first = store.messages.addMessage(session.id, { role: 'user', content: { type: 'text', text: 'first' } })
+        store.messages.addMessage(session.id, { role: 'agent', content: { type: 'text', text: 'answer' } })
+        const latest = store.messages.addMessage(session.id, { role: 'user', content: { type: 'text', text: 'latest' } })
+
+        expect(store.messages.getLatestUserMessage(session.id)?.id).toBe(latest.id)
+        expect(store.messages.getLatestUserMessage(session.id)?.id).not.toBe(first.id)
+    })
+
+    it('returns null when the session has no user turn', () => {
+        const store = makeStore()
+        const session = makeSession(store, 'latest-user-empty')
+        store.messages.addMessage(session.id, { role: 'agent', content: { type: 'text', text: 'answer' } })
+
+        expect(store.messages.getLatestUserMessage(session.id)).toBeNull()
+    })
+
+    it('ignores future scheduled rows that have not entered the conversation', () => {
+        const store = makeStore()
+        const session = makeSession(store, 'latest-user-scheduled')
+        const current = store.messages.addMessage(
+            session.id,
+            { role: 'user', content: { type: 'text', text: 'current' } },
+            'current-local-id'
+        )
+        store.messages.addMessage(
+            session.id,
+            { role: 'user', content: { type: 'text', text: 'future' } },
+            'future-local-id',
+            Date.now() + 60_000
+        )
+
+        expect(store.messages.getLatestUserMessage(session.id)?.id).toBe(current.id)
+    })
+})
+
 describe('cancelQueuedMessage', () => {
     it('happy path: deletes queued message, returns status=cancelled with localId', () => {
         const store = makeStore()

@@ -8,6 +8,7 @@ import {
     lookupQueuedMessage,
     getMessages,
     getFirstMessages,
+    getLatestUserMessage,
     getDeliverableMessagesAfter,
     getMessagesByPosition,
     getMessagesByPositionAfter,
@@ -57,6 +58,10 @@ export class MessageStore {
 
     getFirstMessages(sessionId: string, limit: number = 50): StoredMessage[] {
         return getFirstMessages(this.db, sessionId, limit)
+    }
+
+    getLatestUserMessage(sessionId: string): StoredMessage | null {
+        return getLatestUserMessage(this.db, sessionId)
     }
 
     getDeliverableMessagesAfter(sessionId: string, afterSeq: number, now: number, limit: number = 200): StoredMessage[] {

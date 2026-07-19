@@ -5,6 +5,7 @@ import type { ReactNode } from 'react'
 import type { SessionSummary } from '@/types/api'
 import { I18nProvider } from '@/lib/i18n-context'
 import { SessionList } from './SessionList'
+import { getSessionLastSeenAt } from '@/lib/sessionLastSeen'
 
 afterEach(() => cleanup())
 
@@ -179,6 +180,36 @@ describe('SessionList collapse behavior', () => {
         expect(screen.getByText('Unread task').className).toContain('text-red-500')
         expect(screen.getByText('Unread task').closest('button')?.querySelectorAll('.text-red-500')).toHaveLength(2)
         expect(screen.getByText('Archived task').className).not.toContain('text-red-500')
+    })
+
+    it('re-clicking the selected row clears the revision on this device', () => {
+        localStorage.clear()
+        const onSelect = vi.fn()
+        const session = makeSession({
+            id: 'selected-attention',
+            active: true,
+            attentionRev: 4,
+            metadata: { path: '/work/hapi', name: 'Selected attention', flavor: 'codex' },
+        })
+        renderWithProviders(
+            <SessionList
+                sessions={[session]}
+                selectedSessionId={session.id}
+                onSelect={onSelect}
+                onNewSession={vi.fn()}
+                onRefresh={vi.fn()}
+                isLoading={false}
+                renderHeader={false}
+                api={null}
+            />
+        )
+
+        const row = screen.getByText('Selected attention').closest('button')!
+        fireEvent.mouseDown(row, { button: 0 })
+        fireEvent.mouseUp(row, { button: 0 })
+
+        expect(getSessionLastSeenAt(session.id)).toBe(4)
+        expect(onSelect).toHaveBeenCalledWith(session.id)
     })
 
     it('keeps a selected running path collapsed across live session-list refreshes', async () => {

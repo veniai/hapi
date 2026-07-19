@@ -107,7 +107,7 @@ describe('attention revision — hub (web-chat-read-position-sync §2.1/§3.1/§
         expect(cache.getSession(session.id)?.attentionRev).toBe(1)
     })
 
-    it('resolving a request (non-empty→non-empty) does not double-bump', () => {
+    it('a replacement request bumps even when the request count stays non-zero', () => {
         const { store, cache, session } = setup()
         const { emitUpdateState } = registerAttnHandlers(store, cache, session.id)
 
@@ -115,7 +115,7 @@ describe('attention revision — hub (web-chat-read-position-sync §2.1/§3.1/§
         // Second update still has a request (not an empty→non-empty transition).
         emitUpdateState({ requests: { 'req-2': { tool: 'Edit' } } }, 2)
 
-        expect(cache.getSession(session.id)?.attentionRev).toBe(1)
+        expect(cache.getSession(session.id)?.attentionRev).toBe(2)
     })
 
     it('a background task starting (0→N) bumps attentionRev', () => {
@@ -127,7 +127,7 @@ describe('attention revision — hub (web-chat-read-position-sync §2.1/§3.1/§
     it('send advances handledRev to attentionRev (§3.1.4 — clears all devices)', () => {
         const { cache, session } = setup()
         cache.bumpAttention(session.id)   // attentionRev = 1
-        const result = cache.advanceHandled(session.id)
+        const result = cache.advanceHandled(session.id, 1)
         const s = cache.getSession(session.id)!
         expect(result?.changed).toBe(true)
         expect(s.handledRev).toBe(1)
@@ -137,15 +137,15 @@ describe('attention revision — hub (web-chat-read-position-sync §2.1/§3.1/§
     it('advanceHandled is idempotent when already caught up (no spurious clear)', () => {
         const { cache, session } = setup()
         cache.bumpAttention(session.id)
-        cache.advanceHandled(session.id)
-        const second = cache.advanceHandled(session.id)
+        cache.advanceHandled(session.id, 1)
+        const second = cache.advanceHandled(session.id, 1)
         expect(second?.changed).toBe(false)
     })
 
     it('new attention after a send re-lights (attentionRev > handledRev, §3.1.6)', () => {
         const { cache, session } = setup()
         cache.bumpAttention(session.id)   // 1
-        cache.advanceHandled(session.id)  // handled = 1
+        cache.advanceHandled(session.id, 1)  // handled = 1
         cache.bumpAttention(session.id)   // attention = 2
         const s = cache.getSession(session.id)!
         expect(s.attentionRev ?? 0).toBe(2)
@@ -156,7 +156,7 @@ describe('attention revision — hub (web-chat-read-position-sync §2.1/§3.1/§
     it('bump/advance are persisted to the store (survive refresh)', () => {
         const { store, cache, session } = setup()
         cache.bumpAttention(session.id)
-        cache.advanceHandled(session.id)
+        cache.advanceHandled(session.id, 1)
         cache.bumpAttention(session.id)
 
         const stored = store.sessions.getSession(session.id)!
@@ -164,15 +164,25 @@ describe('attention revision — hub (web-chat-read-position-sync §2.1/§3.1/§
         expect(stored.handledRev).toBe(1)
     })
 
-    it('records the unread-start message id when bump carries one (§2.3)', () => {
-        const { cache, session } = setup()
-        cache.bumpAttention(session.id, { messageId: 'msg-ready-1' })
-        expect(cache.getSession(session.id)?.lastAttentionMessageId).toBe('msg-ready-1')
-        // A later bump without a messageId does not clobber the prior hint.
+    it('derives a visible unread-start anchor from the latest durable user turn', () => {
+        const { store, cache, session } = setup()
+        const user = store.messages.addMessage(session.id, userText)
         cache.bumpAttention(session.id)
-        expect(cache.getSession(session.id)?.lastAttentionMessageId).toBe('msg-ready-1')
-        // refreshSession preserves the cache-only hint (it is not stored).
+        expect(cache.getSession(session.id)?.lastAttentionMessageId).toBe(`user-text:${user.id}`)
+
+        // The hint is rebuilt from message history after a cache refresh/restart.
         cache.refreshSession(session.id)
-        expect(cache.getSession(session.id)?.lastAttentionMessageId).toBe('msg-ready-1')
+        expect(cache.getSession(session.id)?.lastAttentionMessageId).toBe(`user-text:${user.id}`)
+    })
+
+    it('does not clear attention that arrived after the send observed its revision', () => {
+        const { cache, session } = setup()
+        cache.bumpAttention(session.id) // send observes 1
+        cache.bumpAttention(session.id) // concurrent result becomes 2
+
+        cache.advanceHandled(session.id, 1)
+
+        expect(cache.getSession(session.id)?.handledRev).toBe(1)
+        expect(cache.getSession(session.id)?.attentionRev).toBe(2)
     })
 })

@@ -8,7 +8,7 @@ import type { SyncEvent } from '../../../sync/syncEngine'
 import { extractTodoWriteTodosFromMessageContent } from '../../../sync/todos'
 import { extractTeamStateFromMessageContent, applyTeamStateDelta } from '../../../sync/teams'
 import { extractBackgroundTaskDelta } from '../../../sync/backgroundTasks'
-import { shouldRecordSessionActivity, isAgentResultContent, countPendingRequests } from '../../../sync/sessionActivity'
+import { shouldRecordSessionActivity, isAgentResultContent, getPendingRequestIds } from '../../../sync/sessionActivity'
 import type { CliSocketWithData } from '../../socketTypes'
 import type { SessionEndReason } from '@hapi/protocol'
 import type { AccessErrorReason, AccessResult } from './types'
@@ -75,7 +75,7 @@ export type SessionHandlersDeps = {
     /** Raise the session's attention revision (§2.1/§4.1). Wired to
      *  syncEngine.bumpAttention — bumps on agent-result content and on a
      *  permission/input request appearing. */
-    onAttentionBump?: (sessionId: string, messageId?: string) => void
+    onAttentionBump?: (sessionId: string) => void
     /** Delegates session-end immediate-queue sweep to the MessageService layer. */
     onSweepImmediateQueued?: (sessionId: string, now: number) => void
     /** Drops the queued-thinking grace so synchronous CLI handlers (e.g. slash
@@ -122,9 +122,8 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
         }
         // §4.1 unread attention: an agent turn that produced a ready result.
         // Strictly agent-only — user text must NOT raise attention (§4.1/§3.1.8).
-        // Carry the message id so the web can use it as the unread-start hint (§2.3).
         if (isAgentResultContent(content)) {
-            onAttentionBump?.(sid, msg.id)
+            onAttentionBump?.(sid)
         }
 
         const todos = extractTodoWriteTodosFromMessageContent(content)
@@ -250,9 +249,10 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
             return
         }
 
-        // §4.1 permission/input attention: detect the empty→non-empty requests
-        // transition using the pre-update cached state vs the incoming payload.
-        const prevRequestCount = countPendingRequests(sessionAccess.value.agentState)
+        // §4.1 permission/input attention: detect request identities that were
+        // not present in the preceding state. Count-only comparison misses a
+        // req-1 -> req-2 replacement delivered in one state update.
+        const prevRequestIds = getPendingRequestIds(sessionAccess.value.agentState)
 
         const result = store.sessions.updateSessionAgentState(
             sid,
@@ -269,7 +269,8 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
         }
 
         if (result.result === 'success') {
-            if (prevRequestCount === 0 && countPendingRequests(agentState) > 0) {
+            const nextRequestIds = getPendingRequestIds(agentState)
+            if ([...nextRequestIds].some((requestId) => !prevRequestIds.has(requestId))) {
                 onAttentionBump?.(sid)
             }
             const update = {

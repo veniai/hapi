@@ -748,11 +748,12 @@ describe('MessageService.sendMessage with scheduledAt', () => {
         const futureMs = Date.now() + 60_000
 
         const service = new MessageService(store, io, publisher as any)
-        await service.sendMessage(session.id, {
+        const outcome = await service.sendMessage(session.id, {
             text: 'hello future',
             localId: 'local-sched',
             scheduledAt: futureMs
         })
+        expect(outcome).toEqual({ scheduledForFuture: true })
 
         // DB must have the message with scheduledAt set
         const msgs = store.messages.getUninvokedLocalMessages(session.id)
@@ -786,7 +787,8 @@ describe('MessageService.sendMessage with scheduledAt', () => {
         } as unknown as Server
 
         const service = new MessageService(store, io, publisher as any)
-        await service.sendMessage(session.id, { text: 'immediate', localId: 'local-imm' })
+        const outcome = await service.sendMessage(session.id, { text: 'immediate', localId: 'local-imm' })
+        expect(outcome).toEqual({ scheduledForFuture: false })
 
         // CLI must receive the message immediately
         expect(cliEmitted).toHaveLength(1)
@@ -817,11 +819,12 @@ describe('MessageService.sendMessage with scheduledAt', () => {
         const pastMs = Date.now() - 5_000
 
         const service = new MessageService(store, io, publisher as any)
-        await service.sendMessage(session.id, {
+        const outcome = await service.sendMessage(session.id, {
             text: 'past scheduled',
             localId: 'local-past',
             scheduledAt: pastMs
         })
+        expect(outcome).toEqual({ scheduledForFuture: false })
 
         // Past scheduled_at is already mature → emit to CLI immediately
         expect(cliEmitted).toHaveLength(1)
@@ -946,9 +949,10 @@ describe('MessageService.releaseMatureScheduledMessages', () => {
         store.messages.addMessage(session.id, { role: 'user', content: { type: 'text', text: 'hi' } }, 'local-r', past)
 
         const service = new MessageService(store, io, publisher as any)
-        service.releaseMatureScheduledMessages(now)
+        const maturedSessionIds = service.releaseMatureScheduledMessages(now)
 
         expect(cliEmitted).toHaveLength(1)
+        expect(maturedSessionIds).toEqual(new Set([session.id]))
     })
 
     it('emits scheduled-matured once per session for web session-list refresh', async () => {

@@ -463,6 +463,8 @@ type SessionChatProps = {
     onAtBottomChange: (atBottom: boolean) => void
     /** Initial read-position target (LWW winner); HappyThread scrolls to it on entry. */
     locatorTargetMessageId: string | null
+    /** Entry target selection has completed for this session. */
+    initialPositionReady: boolean
     /** Located window has messages beyond it; surfacing a "load newer" affordance. */
     hasNewerMessages: boolean
     /** Page forward from a located window toward the latest messages. */
@@ -1367,6 +1369,7 @@ function SessionChatInner(props: SessionChatProps) {
                         sendScrollPreviousMessageId={sendScrollPreviousMessageId}
                         hubLastReadAt={props.session.lastReadAt ?? null}
                         locatorTargetMessageId={props.locatorTargetMessageId}
+                        initialPositionReady={props.initialPositionReady}
                         hasNewer={props.hasNewerMessages}
                         onFetchNewer={props.onFetchNewer}
                     />

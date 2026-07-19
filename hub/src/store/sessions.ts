@@ -576,19 +576,23 @@ export function bumpAttentionRev(
 export function advanceHandledRev(
     db: Database,
     id: string,
-    namespace: string
-): { attentionRev: number; changed: boolean } | null {
+    namespace: string,
+    handledThroughRev: number
+): { handledRev: number; changed: boolean } | null {
+    const safeHandledThroughRev = Number.isFinite(handledThroughRev)
+        ? Math.max(0, Math.trunc(handledThroughRev))
+        : 0
     const result = db.prepare(`
         UPDATE sessions
-        SET handled_rev = attention_rev
+        SET handled_rev = MIN(attention_rev, @handledThroughRev)
         WHERE id = @id AND namespace = @namespace
-          AND handled_rev < attention_rev
-    `).run({ id, namespace })
+          AND handled_rev < MIN(attention_rev, @handledThroughRev)
+    `).run({ id, namespace, handledThroughRev: safeHandledThroughRev })
     const row = db.prepare(
-        'SELECT attention_rev AS a, handled_rev AS h FROM sessions WHERE id = ? AND namespace = ?'
-    ).get(id, namespace) as { a: number; h: number } | undefined
+        'SELECT handled_rev AS h FROM sessions WHERE id = ? AND namespace = ?'
+    ).get(id, namespace) as { h: number } | undefined
     if (!row) return null
-    return { attentionRev: row.a, changed: result.changes === 1 }
+    return { handledRev: row.h, changed: result.changes === 1 }
 }
 
 export function setSessionEffort(

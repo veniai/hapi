@@ -1,5 +1,36 @@
 import { describe, expect, it } from 'vitest'
-import { pickEntryTarget } from './read-position-target'
+import { isOptimisticEntryTarget, pickEntryTarget, shouldMarkSessionEntry } from './read-position-target'
+
+describe('isOptimisticEntryTarget', () => {
+    it('recognizes raw and composite optimistic message ids', () => {
+        expect(isOptimisticEntryTarget('__optimistic__abc')).toBe(true)
+        expect(isOptimisticEntryTarget('user-text:__optimistic__abc')).toBe(true)
+        expect(isOptimisticEntryTarget('user-text:durable-id')).toBe(false)
+    })
+})
+
+describe('shouldMarkSessionEntry', () => {
+    it('marks once per actual route entry, not on selected-session updates', () => {
+        expect(shouldMarkSessionEntry({
+            selectedSessionId: 'a', markedSessionId: null, sessionLoaded: true, tabVisible: true
+        })).toBe(true)
+        expect(shouldMarkSessionEntry({
+            selectedSessionId: 'a', markedSessionId: 'a', sessionLoaded: true, tabVisible: true
+        })).toBe(false)
+        expect(shouldMarkSessionEntry({
+            selectedSessionId: 'b', markedSessionId: 'a', sessionLoaded: true, tabVisible: true
+        })).toBe(true)
+    })
+
+    it('waits for session data and a visible tab', () => {
+        expect(shouldMarkSessionEntry({
+            selectedSessionId: 'a', markedSessionId: null, sessionLoaded: false, tabVisible: true
+        })).toBe(false)
+        expect(shouldMarkSessionEntry({
+            selectedSessionId: 'a', markedSessionId: null, sessionLoaded: true, tabVisible: false
+        })).toBe(false)
+    })
+})
 
 describe('pickEntryTarget — §5.1 LWW + §2.3 unread-start', () => {
     it('prefers the newer of saved vs hub (LWW)', () => {

@@ -8,6 +8,7 @@ import {
     fetchOlderMessages,
     flushPendingMessages,
     getMessageWindowState,
+    messageWindowContainsTarget,
     setAtBottom as setMessageWindowAtBottom,
     subscribeMessageWindow,
     type MessageWindowState,
@@ -80,6 +81,9 @@ export function useMessages(api: ApiClient | null, sessionId: string | null): {
     const loadInitial = useCallback(async (targetMessageId: string | null) => {
         if (!api || !sessionId) return false
         if (targetMessageId) {
+            if (messageWindowContainsTarget(sessionId, targetMessageId)) {
+                return true
+            }
             const result = await fetchLocatedWindow(api, sessionId, targetMessageId)
             if (!result.ok) {
                 if (result.reason === 'not-found') {

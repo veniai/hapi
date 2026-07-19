@@ -36,8 +36,8 @@ const MESSAGE_ANCHOR_SELECTOR = '.happy-thread-messages > [id]'
 const AUTO_SCROLL_RESUME_THRESHOLD_PX = 120
 const MANUAL_SCROLL_EPSILON_PX = 1
 const SEND_SCROLL_TIMEOUT_MS = 1500
-const BOTTOM_SCROLL_TIMEOUT_MS = 5000
 const SCROLL_PERSIST_DELAY_MS = 150
+const NEWER_PREFETCH_MARGIN_PX = 600
 // Bounded re-verification of saved-scroll restore after a cold reload: later
 // ResizeObserver ticks re-check the anchor's offset and correct drift caused by
 // markdown/code/font reflow that hadn't settled when restoreScrollAnchor ran.
@@ -144,6 +144,42 @@ export function restoreScrollAnchor(viewport: HTMLElement, anchor: ScrollAnchor)
     const targetRect = target.getBoundingClientRect()
     viewport.scrollTop += targetRect.top - viewportRect.top - anchor.topOffset
     return true
+}
+
+export function getRenderedMessageIds(viewport: HTMLElement): Set<string> {
+    return new Set(
+        Array.from(viewport.querySelectorAll<HTMLElement>(MESSAGE_ANCHOR_SELECTOR), (message) => message.id)
+    )
+}
+
+export function findFirstNewRenderedMessage(
+    viewport: HTMLElement,
+    previousIds: ReadonlySet<string>
+): HTMLElement | null {
+    return Array.from(viewport.querySelectorAll<HTMLElement>(MESSAGE_ANCHOR_SELECTOR))
+        .find((message) => !previousIds.has(message.id)) ?? null
+}
+
+export function findFirstMessageAfterViewport(viewport: HTMLElement): HTMLElement | null {
+    const viewportBottom = viewport.getBoundingClientRect().bottom
+    return Array.from(viewport.querySelectorAll<HTMLElement>(MESSAGE_ANCHOR_SELECTOR))
+        .find((message) => message.getBoundingClientRect().top >= viewportBottom) ?? null
+}
+
+export function shouldRestoreInitialLatest(input: {
+    ready: boolean
+    pending: boolean
+    locatorActive: boolean
+    hasSavedPosition: boolean
+    messagesLoaded: boolean
+    messagesLoading: boolean
+}): boolean {
+    return input.ready
+        && input.pending
+        && !input.locatorActive
+        && !input.hasSavedPosition
+        && input.messagesLoaded
+        && !input.messagesLoading
 }
 
 export async function locateOutlineTargetMessage(options: LocateOutlineTargetOptions): Promise<HTMLElement | null> {
@@ -353,6 +389,9 @@ export function HappyThread(props: {
      *  saved/bottom — the core fix for §4.3 "落 target". null = no target
      *  (first-ever visit → bottom; or saved-only restore). */
     locatorTargetMessageId: string | null
+    /** Prevent initial restore/writeback until the router has selected the one
+     *  entry target for this session. */
+    initialPositionReady: boolean
     /** Located window has messages beyond it — show a "load newer" affordance. */
     hasNewer: boolean
     /** Page forward from the located window toward the latest messages. */
@@ -362,12 +401,15 @@ export function HappyThread(props: {
     const { terminalToolDisplayMode } = useTerminalToolDisplayMode()
     const viewportRef = useRef<HTMLDivElement | null>(null)
     const contentRef = useRef<HTMLDivElement | null>(null)
+    const newerSentinelRef = useRef<HTMLDivElement | null>(null)
+    const positionSettledRef = useRef(false)
 
     // Report last-read position to hub (pagehide/visibility/switch, low-frequency)
     useReadPositionReporter({
         api: props.api,
         sessionId: props.sessionId,
         getAnchorMessageId: () => {
+            if (!positionSettledRef.current) return null
             const viewport = viewportRef.current
             if (!viewport) return null
             return captureReadPositionAnchor(viewport)
@@ -394,6 +436,7 @@ export function HappyThread(props: {
     const forceScrollTokenRef = useRef(props.forceScrollToken)
     const lastScrollTopRef = useRef(0)
     const pendingSavedScrollRef = useRef<PersistedChatScrollPosition | null>(readChatScrollPosition(props.sessionId))
+    const initialLatestPositionPendingRef = useRef(pendingSavedScrollRef.current === null)
     // Bounded re-verification state (see verifySavedRestore).
     const savedRestoreVerificationRef = useRef<{ anchor: ScrollAnchor; ticksRemaining: number; stableTicks: number; deadline: number } | null>(null)
     // Initial-position target mode: when locatorTargetMessageId is set, the
@@ -404,15 +447,15 @@ export function HappyThread(props: {
     const locatorTargetRetriesRef = useRef(0)
     const ignoreNextRestorationScrollRef = useRef(false)
     const pendingSendScrollRef = useRef<{ deadline: number; previousMessageId: string | null } | null>(null)
-    const pendingBottomScrollRef = useRef(false)
-    const pendingBottomFlushCompleteRef = useRef(false)
-    const pendingBottomDeadlineRef = useRef(0)
-    const pendingBottomTimersRef = useRef<number[]>([])
+    const pendingContinueRef = useRef<{ previousIds: Set<string>; baselineVersion: number } | null>(null)
+    const pendingNewerAnchorRef = useRef<ScrollAnchor | null>(null)
+    const newerLoadInFlightRef = useRef(false)
+    const newerPrefetchArmedRef = useRef(true)
     const persistTimerRef = useRef<number | null>(null)
-    const mountedRef = useRef(true)
     const pendingCountRef = useRef(props.pendingCount)
     const findLatestUserMessageIdRef = useRef(props.findLatestUserMessageId)
     pendingCountRef.current = props.pendingCount
+    messagesVersionRef.current = props.messagesVersion
 
     // Smart scroll state: enabled only while the user is intentionally at the bottom.
     const autoScrollEnabledRef = useRef(true)
@@ -431,9 +474,6 @@ export function HappyThread(props: {
     useEffect(() => {
         hasLoadedMessagesRef.current = props.hasLoadedMessages
     }, [props.hasLoadedMessages])
-    useEffect(() => {
-        messagesVersionRef.current = props.messagesVersion
-    }, [props.messagesVersion])
     useEffect(() => {
         onLoadMoreRef.current = props.onLoadMore
     }, [props.onLoadMore])
@@ -474,7 +514,7 @@ export function HappyThread(props: {
         }
         atBottomRef.current = atBottom
         onAtBottomChangeRef.current(atBottom)
-        if (atBottom && !pendingBottomScrollRef.current) {
+        if (atBottom) {
             onFlushPendingRef.current()
         }
     }, [])
@@ -501,63 +541,17 @@ export function HappyThread(props: {
     }, [props.sessionId])
 
     const scheduleViewportPositionPersist = useCallback((viewport: HTMLElement) => {
+        if (!positionSettledRef.current) return
         if (persistTimerRef.current !== null) {
             window.clearTimeout(persistTimerRef.current)
         }
         persistTimerRef.current = window.setTimeout(() => {
             persistTimerRef.current = null
-            if (pendingSavedScrollRef.current === null) {
+            if (positionSettledRef.current && pendingSavedScrollRef.current === null) {
                 persistViewportPosition(viewport)
             }
         }, SCROLL_PERSIST_DELAY_MS)
     }, [persistViewportPosition])
-
-    const clearPendingBottomScroll = useCallback(() => {
-        pendingBottomScrollRef.current = false
-        pendingBottomFlushCompleteRef.current = false
-        pendingBottomDeadlineRef.current = 0
-        for (const timer of pendingBottomTimersRef.current) {
-            window.clearTimeout(timer)
-        }
-        pendingBottomTimersRef.current = []
-    }, [])
-
-    const finishPendingBottomScroll = useCallback((): boolean => {
-        if (!pendingBottomScrollRef.current) return false
-        if (Date.now() > pendingBottomDeadlineRef.current) {
-            clearPendingBottomScroll()
-            return false
-        }
-        const viewport = viewportRef.current
-        if (!viewport) return false
-        viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' })
-        lastScrollTopRef.current = viewport.scrollTop
-        if (pendingBottomFlushCompleteRef.current && pendingCountRef.current === 0) {
-            clearPendingBottomScroll()
-        }
-        return true
-    }, [clearPendingBottomScroll])
-
-    const beginPendingBottomScroll = useCallback(() => {
-        if (pendingBottomScrollRef.current) return
-        pendingSavedScrollRef.current = null
-        pendingBottomScrollRef.current = true
-        pendingBottomFlushCompleteRef.current = false
-        pendingBottomDeadlineRef.current = Date.now() + BOTTOM_SCROLL_TIMEOUT_MS
-        const finishFlush = () => {
-            if (!mountedRef.current) return
-            pendingBottomFlushCompleteRef.current = true
-            for (const delay of [0, 50, 200, 500]) {
-                pendingBottomTimersRef.current.push(window.setTimeout(finishPendingBottomScroll, delay))
-            }
-        }
-        try {
-            Promise.resolve(onFlushPendingRef.current()).then(finishFlush, finishFlush)
-        } catch {
-            finishFlush()
-        }
-        finishPendingBottomScroll()
-    }, [finishPendingBottomScroll])
 
     // Track scroll position to toggle autoScroll (stable listener using refs)
     useEffect(() => {
@@ -579,6 +573,8 @@ export function HappyThread(props: {
                 return
             }
             // user-driven scroll (not a restore re-anchor) — stop verifying
+            positionSettledRef.current = true
+            initialLatestPositionPendingRef.current = false
             savedRestoreVerificationRef.current = null
             if (pendingSavedScrollRef.current === null) {
                 scheduleViewportPositionPersist(viewport)
@@ -592,7 +588,7 @@ export function HappyThread(props: {
 
             if (intent.isNearBottom) {
                 if (pendingCountRef.current > 0) {
-                    beginPendingBottomScroll()
+                    onFlushPendingRef.current()
                 }
                 setAutoScrollMode(true)
                 setAtBottomMode(true)
@@ -606,7 +602,7 @@ export function HappyThread(props: {
         const cancelSavedRestore = () => {
             savedRestoreVerificationRef.current = null
             ignoreNextRestorationScrollRef.current = false
-            clearPendingBottomScroll()
+            pendingContinueRef.current = null
             if (pendingSavedScrollRef.current !== null) {
                 pendingSavedScrollRef.current = null
                 persistViewportPosition(viewport)
@@ -622,18 +618,15 @@ export function HappyThread(props: {
                 window.clearTimeout(persistTimerRef.current)
                 persistTimerRef.current = null
             }
-            if (pendingSavedScrollRef.current === null) {
+            if (positionSettledRef.current && pendingSavedScrollRef.current === null) {
                 persistViewportPosition(viewport)
             }
-            clearPendingBottomScroll()
             viewport.removeEventListener('scroll', handleScroll)
             viewport.removeEventListener('wheel', cancelSavedRestore)
             viewport.removeEventListener('touchstart', cancelSavedRestore)
             viewport.removeEventListener('pointerdown', cancelSavedRestore)
         }
     }, [
-        beginPendingBottomScroll,
-        clearPendingBottomScroll,
         persistViewportPosition,
         props.sessionId,
         scheduleViewportPositionPersist,
@@ -641,24 +634,7 @@ export function HappyThread(props: {
         setAutoScrollMode
     ])
 
-    const requestBottomScroll = useCallback(() => {
-        beginPendingBottomScroll()
-        autoScrollEnabledRef.current = true
-        if (!atBottomRef.current) {
-            atBottomRef.current = true
-            onAtBottomChangeRef.current(true)
-        }
-        finishPendingBottomScroll()
-    }, [beginPendingBottomScroll, finishPendingBottomScroll])
-
-    useEffect(() => {
-        mountedRef.current = true
-        return () => {
-            mountedRef.current = false
-            settlePendingLoad(false)
-            clearPendingBottomScroll()
-        }
-    }, [clearPendingBottomScroll, settlePendingLoad])
+    useEffect(() => () => settlePendingLoad(false), [settlePendingLoad])
 
     const verifySavedRestore = useCallback((): boolean => {
         const verification = savedRestoreVerificationRef.current
@@ -693,6 +669,7 @@ export function HappyThread(props: {
     }, [])
 
     const restoreSavedPosition = useCallback((): boolean => {
+        if (!props.initialPositionReady) return false
         // Target mode owns the initial position — saved must not override it
         // (the cross-device case where saved is stale and hub target won LWW).
         if (locatorTargetActiveRef.current) return false
@@ -715,6 +692,8 @@ export function HappyThread(props: {
                     deadline: Date.now() + RESTORE_VERIFY_TIMEOUT_MS,
                 }
                 pendingSavedScrollRef.current = null
+                initialLatestPositionPendingRef.current = false
+                positionSettledRef.current = true
                 lastScrollTopRef.current = viewport.scrollTop
                 window.requestAnimationFrame(() => {
                     ignoreNextRestorationScrollRef.current = false
@@ -749,13 +728,36 @@ export function HappyThread(props: {
             ? null
             : { ...saved, scrollTop: resolved.pendingScrollTop }
         if (pendingSavedScrollRef.current === null) {
+            initialLatestPositionPendingRef.current = false
+            positionSettledRef.current = true
             recomputeAtBottom()
         } else {
             setAutoScrollMode(false)
             setAtBottomMode(false)
         }
         return true
-    }, [recomputeAtBottom, setAtBottomMode, setAutoScrollMode])
+    }, [props.initialPositionReady, recomputeAtBottom, setAtBottomMode, setAutoScrollMode])
+
+    const restoreInitialLatestPosition = useCallback((): boolean => {
+        const viewport = viewportRef.current
+        if (!viewport || !shouldRestoreInitialLatest({
+            ready: props.initialPositionReady,
+            pending: initialLatestPositionPendingRef.current,
+            locatorActive: locatorTargetActiveRef.current,
+            hasSavedPosition: pendingSavedScrollRef.current !== null,
+            messagesLoaded: hasLoadedMessagesRef.current,
+            messagesLoading: isLoadingMessagesRef.current
+        })) {
+            return false
+        }
+        viewport.scrollTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
+        lastScrollTopRef.current = viewport.scrollTop
+        initialLatestPositionPendingRef.current = false
+        positionSettledRef.current = true
+        setAutoScrollMode(true)
+        setAtBottomMode(true)
+        return true
+    }, [props.initialPositionReady, setAtBottomMode, setAutoScrollMode])
 
     // Initial-position target mode (§4.3 落 target). When a locator target is
     // set, disable saved restoration and scroll the target into view once its
@@ -764,10 +766,8 @@ export function HappyThread(props: {
     useLayoutEffect(() => {
         const target = props.locatorTargetMessageId
         if (target) {
-            // Activate locator mode for ANY target (saved or hub). Saved pixel
-            // offset restore proved unstable on refresh (layout timing left it
-            // ~1 message off); landing the target message at viewport top is
-            // message-accurate, which is what "位置记住" actually needs.
+            // Router only passes hub/unread winners here. Saved winners retain
+            // their device-specific topOffset through restoreSavedPosition.
             locatorTargetActiveRef.current = true
             locatorTargetRetriesRef.current = 0
             pendingSavedScrollRef.current = null
@@ -798,15 +798,20 @@ export function HappyThread(props: {
                 }
             })
             locatorTargetActiveRef.current = false
+            initialLatestPositionPendingRef.current = false
+            positionSettledRef.current = true
             recomputeAtBottom()
             return
         }
         locatorTargetRetriesRef.current += 1
         if (locatorTargetRetriesRef.current > 20) {
-            // NB-3: target never rendered (filtered/deleted) — release target
-            // mode AND scroll to bottom so the user isn't stuck at scrollTop=0.
+            // Target was filtered/deleted. Fall back to the nearest rendered
+            // row in the located window, never to the absolute latest message.
             locatorTargetActiveRef.current = false
-            viewport.scrollTo({ top: viewport.scrollHeight })
+            const nearest = viewport.querySelector<HTMLElement>(MESSAGE_ANCHOR_SELECTOR)
+            nearest?.scrollIntoView({ block: 'start' })
+            initialLatestPositionPendingRef.current = false
+            positionSettledRef.current = true
             lastScrollTopRef.current = viewport.scrollTop
             recomputeAtBottom()
         }
@@ -828,25 +833,26 @@ export function HappyThread(props: {
         target.scrollIntoView({ block: 'start', behavior: 'smooth' })
         lastScrollTopRef.current = viewport.scrollTop
         pendingSavedScrollRef.current = null
-        clearPendingBottomScroll()
+        positionSettledRef.current = true
+        pendingContinueRef.current = null
         pendingSendScrollRef.current = null
         autoScrollEnabledRef.current = false
         setAtBottomMode(false)
         return true
-    }, [clearPendingBottomScroll, setAtBottomMode])
+    }, [setAtBottomMode])
 
     useEffect(() => {
         if (forceScrollTokenRef.current === props.forceScrollToken) return
         forceScrollTokenRef.current = props.forceScrollToken
         pendingSavedScrollRef.current = null
-        clearPendingBottomScroll()
+        pendingContinueRef.current = null
         pendingSendScrollRef.current = {
             deadline: Date.now() + SEND_SCROLL_TIMEOUT_MS,
             previousMessageId: props.sendScrollPreviousMessageId
         }
         const timers = [0, 50, 200, 500, 1000].map((delay) => window.setTimeout(scrollToSentMessage, delay))
         return () => timers.forEach((timer) => window.clearTimeout(timer))
-    }, [clearPendingBottomScroll, props.forceScrollToken, props.sendScrollPreviousMessageId, scrollToSentMessage])
+    }, [props.forceScrollToken, props.sendScrollPreviousMessageId, scrollToSentMessage])
 
     const loadOlderPreservingScroll = useCallback((): Promise<boolean> => {
         if (pendingLoadPromiseRef.current) {
@@ -904,6 +910,121 @@ export function HappyThread(props: {
         return loadPromise
     }, [settlePendingLoad])
 
+    const finishContinueReading = useCallback((): boolean => {
+        const pending = pendingContinueRef.current
+        const viewport = viewportRef.current
+        if (!pending || !viewport || messagesVersionRef.current === pending.baselineVersion) {
+            return false
+        }
+        pendingContinueRef.current = null
+        const target = findFirstNewRenderedMessage(viewport, pending.previousIds)
+        if (!target) return false
+        target.scrollIntoView({ block: 'start' })
+        pendingNewerAnchorRef.current = null
+        pendingSavedScrollRef.current = null
+        lastScrollTopRef.current = viewport.scrollTop
+        autoScrollEnabledRef.current = false
+        setAtBottomMode(false)
+        return true
+    }, [setAtBottomMode])
+
+    const restoreNewerLoadAnchor = useCallback((): boolean => {
+        const viewport = viewportRef.current
+        const anchor = pendingNewerAnchorRef.current
+        if (!viewport || !anchor) return false
+        pendingNewerAnchorRef.current = null
+        if (!restoreScrollAnchor(viewport, anchor)) return false
+        lastScrollTopRef.current = viewport.scrollTop
+        return true
+    }, [])
+
+    const loadNewerPreservingScroll = useCallback(async (): Promise<boolean> => {
+        const viewport = viewportRef.current
+        if (
+            !viewport
+            || !props.hasNewer
+            || props.isLoadingMoreMessages
+            || newerLoadInFlightRef.current
+        ) {
+            return false
+        }
+        newerLoadInFlightRef.current = true
+        pendingNewerAnchorRef.current = captureScrollAnchor(viewport)
+        const baselineVersion = messagesVersionRef.current
+        try {
+            await props.onFetchNewer()
+            return messagesVersionRef.current !== baselineVersion
+        } catch (error) {
+            pendingContinueRef.current = null
+            console.error('Failed to load newer messages:', error)
+            return false
+        } finally {
+            window.requestAnimationFrame(() => {
+                if (!finishContinueReading()) {
+                    restoreNewerLoadAnchor()
+                }
+                newerLoadInFlightRef.current = false
+            })
+        }
+    }, [finishContinueReading, props.hasNewer, props.isLoadingMoreMessages, props.onFetchNewer, restoreNewerLoadAnchor])
+
+    const continueReading = useCallback(() => {
+        const viewport = viewportRef.current
+        if (!viewport) return
+        const alreadyRendered = findFirstMessageAfterViewport(viewport)
+        if (alreadyRendered) {
+            alreadyRendered.scrollIntoView({ block: 'start' })
+            pendingSavedScrollRef.current = null
+            positionSettledRef.current = true
+            autoScrollEnabledRef.current = false
+            setAtBottomMode(false)
+            return
+        }
+
+        pendingSavedScrollRef.current = null
+        positionSettledRef.current = true
+        savedRestoreVerificationRef.current = null
+        locatorTargetActiveRef.current = false
+        pendingContinueRef.current = {
+            previousIds: getRenderedMessageIds(viewport),
+            baselineVersion: messagesVersionRef.current
+        }
+        if (props.hasNewer) {
+            void loadNewerPreservingScroll()
+            return
+        }
+        try {
+            void Promise.resolve(onFlushPendingRef.current()).catch(() => {
+                pendingContinueRef.current = null
+            })
+        } catch {
+            pendingContinueRef.current = null
+        }
+    }, [loadNewerPreservingScroll, props.hasNewer, setAtBottomMode])
+
+    useEffect(() => {
+        const root = viewportRef.current
+        const sentinel = newerSentinelRef.current
+        if (!root || !sentinel || !props.hasNewer || typeof IntersectionObserver === 'undefined') {
+            return
+        }
+        const observer = new IntersectionObserver((entries) => {
+            const entry = entries[0]
+            if (!entry?.isIntersecting) {
+                newerPrefetchArmedRef.current = true
+                return
+            }
+            if (!newerPrefetchArmedRef.current) return
+            newerPrefetchArmedRef.current = false
+            void loadNewerPreservingScroll()
+        }, {
+            root,
+            rootMargin: `0px 0px ${NEWER_PREFETCH_MARGIN_PX}px 0px`
+        })
+        observer.observe(sentinel)
+        return () => observer.disconnect()
+    }, [loadNewerPreservingScroll, props.hasNewer])
+
     const handleOutlineSelect = useCallback(async (item: ConversationOutlineItem) => {
         const target = await locateOutlineTargetMessage({
             targetMessageId: item.targetMessageId,
@@ -932,16 +1053,18 @@ export function HappyThread(props: {
             if (scrollToSentMessage()) return
             if (verifySavedRestore()) return
             if (restoreSavedPosition()) return
+            if (restoreInitialLatestPosition()) return
             if (pendingSavedScrollRef.current?.anchor && hasMoreMessagesRef.current) {
                 void loadOlderPreservingScroll()
                 return
             }
-            if (finishPendingBottomScroll()) return
+            if (finishContinueReading()) return
+            if (restoreNewerLoadAnchor()) return
             recomputeAtBottom()
         })
         observer.observe(content)
         return () => observer.disconnect()
-    }, [finishPendingBottomScroll, loadOlderPreservingScroll, recomputeAtBottom, restoreSavedPosition, scrollToSentMessage, verifySavedRestore])
+    }, [finishContinueReading, loadOlderPreservingScroll, recomputeAtBottom, restoreInitialLatestPosition, restoreNewerLoadAnchor, restoreSavedPosition, scrollToSentMessage, verifySavedRestore])
 
     useLayoutEffect(() => {
         const pending = pendingScrollRef.current
@@ -964,13 +1087,15 @@ export function HappyThread(props: {
         if (scrollToSentMessage()) return
         if (verifySavedRestore()) return
         if (restoreSavedPosition()) return
+        if (restoreInitialLatestPosition()) return
         if (pendingSavedScrollRef.current?.anchor && hasMoreMessagesRef.current) {
             void loadOlderPreservingScroll()
             return
         }
-        finishPendingBottomScroll()
+        if (finishContinueReading()) return
+        if (restoreNewerLoadAnchor()) return
         recomputeAtBottom()
-    }, [props.messagesVersion, finishPendingBottomScroll, loadOlderPreservingScroll, recomputeAtBottom, restoreSavedPosition, scrollToSentMessage, settlePendingLoad])
+    }, [props.messagesVersion, finishContinueReading, loadOlderPreservingScroll, recomputeAtBottom, restoreInitialLatestPosition, restoreNewerLoadAnchor, restoreSavedPosition, scrollToSentMessage, settlePendingLoad])
 
     useEffect(() => {
         isLoadingMoreRef.current = props.isLoadingMoreMessages
@@ -1062,14 +1187,15 @@ export function HappyThread(props: {
                             <div className="happy-thread-messages flex flex-col gap-3">
                                 <ThreadPrimitive.Messages components={THREAD_MESSAGE_COMPONENTS} />
                             </div>
+                            <div ref={newerSentinelRef} className="h-px w-full" aria-hidden="true" />
                         </div>
                     </div>
                 </ThreadPrimitive.Viewport>
-                <NewMessagesIndicator count={props.pendingCount} onClick={requestBottomScroll} />
+                <NewMessagesIndicator count={props.pendingCount} onClick={continueReading} />
                 {props.hasNewer ? (
                     <LoadNewerIndicator
                         loading={props.isLoadingMoreMessages}
-                        onClick={() => { void props.onFetchNewer() }}
+                        onClick={continueReading}
                     />
                 ) : null}
                 {props.outlineOpen ? (

@@ -5,10 +5,14 @@ import { I18nProvider } from '@/lib/i18n-context'
 import {
     ConversationOutlinePanel,
     captureScrollAnchor,
+    findFirstMessageAfterViewport,
+    findFirstNewRenderedMessage,
+    getRenderedMessageIds,
     getScrollIntent,
     locateOutlineTargetMessage,
     resolveSavedScrollPosition,
     restoreScrollAnchor,
+    shouldRestoreInitialLatest,
 } from '@/components/AssistantChat/HappyThread'
 import {
     gcChatScrollPositions,
@@ -91,6 +95,32 @@ describe('ConversationOutlinePanel', () => {
 })
 
 describe('scroll anchor helpers', () => {
+    it('restores latest only after entry selection and initial messages settle', () => {
+        expect(shouldRestoreInitialLatest({
+            ready: true,
+            pending: true,
+            locatorActive: false,
+            hasSavedPosition: false,
+            messagesLoaded: true,
+            messagesLoading: false
+        })).toBe(true)
+        expect(shouldRestoreInitialLatest({
+            ready: false,
+            pending: true,
+            locatorActive: false,
+            hasSavedPosition: false,
+            messagesLoaded: true,
+            messagesLoading: false
+        })).toBe(false)
+        expect(shouldRestoreInitialLatest({
+            ready: true,
+            pending: true,
+            locatorActive: true,
+            hasSavedPosition: false,
+            messagesLoaded: true,
+            messagesLoading: false
+        })).toBe(false)
+    })
     it('captures the first visible message relative to the viewport', () => {
         const viewport = document.createElement('div')
         const first = document.createElement('div')
@@ -201,6 +231,47 @@ describe('scroll anchor helpers', () => {
         expect(restoreScrollAnchor(viewport, { id: 'anchored-message', topOffset: 30 })).toBe(true)
         expect(viewport.scrollTop).toBe(250)
 
+        viewport.remove()
+    })
+
+    it('continues to the first already-rendered message below the viewport', () => {
+        const viewport = document.createElement('div')
+        const messages = document.createElement('div')
+        const visible = document.createElement('div')
+        const next = document.createElement('div')
+        messages.className = 'happy-thread-messages'
+        visible.id = 'visible-message'
+        next.id = 'next-message'
+        messages.append(visible, next)
+        viewport.append(messages)
+        document.body.append(viewport)
+
+        vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue(rect({ top: 0, bottom: 500 }))
+        vi.spyOn(visible, 'getBoundingClientRect').mockReturnValue(rect({ top: 100, bottom: 300 }))
+        vi.spyOn(next, 'getBoundingClientRect').mockReturnValue(rect({ top: 520, bottom: 620 }))
+
+        expect(findFirstMessageAfterViewport(viewport)).toBe(next)
+        viewport.remove()
+    })
+
+    it('finds the first message introduced by a newer page or pending flush', () => {
+        const viewport = document.createElement('div')
+        const messages = document.createElement('div')
+        const old = document.createElement('div')
+        const firstNew = document.createElement('div')
+        const secondNew = document.createElement('div')
+        messages.className = 'happy-thread-messages'
+        old.id = 'old-message'
+        messages.append(old)
+        viewport.append(messages)
+        document.body.append(viewport)
+
+        const previousIds = getRenderedMessageIds(viewport)
+        firstNew.id = 'first-new-message'
+        secondNew.id = 'second-new-message'
+        messages.append(firstNew, secondNew)
+
+        expect(findFirstNewRenderedMessage(viewport, previousIds)).toBe(firstNew)
         viewport.remove()
     })
 })

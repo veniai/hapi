@@ -49,10 +49,20 @@ test.describe('red-dot: send clears both devices', () => {
             return redCount > 0
         }
 
-        // Both devices should start lit (precondition).
-        test.skip(!(await dotVisible(pageA)), 'session is not lit on A — precondition not met')
+        // Fail, rather than skip, when the caller supplied the wrong fixture:
+        // otherwise the cross-device test can pass without checking device B.
+        await expect(pageA.locator(rowSelector).first()).toBeVisible()
+        await expect(pageB.locator(rowSelector).first()).toBeVisible()
+        await expect.poll(() => dotVisible(pageA), { message: 'session must start lit on A' }).toBe(true)
+        await expect.poll(() => dotVisible(pageB), { message: 'session must start lit on B' }).toBe(true)
 
-        // A opens the session and sends a reply.
+        // Rule A: A opens the session; B must remain lit.
+        await pageA.goto(`${baseUrl}/sessions/${sessionId}`, { waitUntil: 'domcontentloaded' })
+        await expect.poll(() => dotVisible(pageB), { message: 'opening on A must not clear B' }).toBe(true)
+        await pageA.goto(`${baseUrl}/sessions`, { waitUntil: 'domcontentloaded' })
+        await expect.poll(() => dotVisible(pageA), { message: 'opening on A must clear A' }).toBe(false)
+
+        // Rule B: a successful send on A clears B.
         await pageA.goto(`${baseUrl}/sessions/${sessionId}`, { waitUntil: 'domcontentloaded' })
         await pageA.waitForSelector('textarea', { timeout: 30_000 })
         await pageA.locator('textarea').first().fill('e2e red-dot probe')

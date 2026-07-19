@@ -487,6 +487,76 @@ describe('session model', () => {
         }
     })
 
+    it('does not clear attention created after a send captured its revision', async () => {
+        const store = new Store(':memory:')
+        const engine = new SyncEngine(
+            store,
+            { of: () => ({ to: () => ({ emit() {} }) }) } as never,
+            new RpcRegistry(),
+            { broadcast() {} } as never
+        )
+
+        try {
+            const session = engine.getOrCreateSession(
+                'session-send-concurrent-attention',
+                { path: '/tmp/project', host: 'localhost', flavor: 'codex' },
+                null,
+                'default'
+            )
+            engine.bumpAttention(session.id)
+            let resolveSend!: (value: { scheduledForFuture: boolean }) => void
+            const messageService = (engine as unknown as {
+                messageService: { sendMessage: () => Promise<{ scheduledForFuture: boolean }> }
+            }).messageService
+            messageService.sendMessage = () => new Promise((resolve) => { resolveSend = resolve })
+
+            const sending = engine.sendMessage(session.id, { text: 'reply' })
+            engine.bumpAttention(session.id)
+            resolveSend({ scheduledForFuture: false })
+            await sending
+
+            expect(engine.getSession(session.id)?.attentionRev).toBe(2)
+            expect(engine.getSession(session.id)?.handledRev).toBe(1)
+        } finally {
+            engine.stop()
+        }
+    })
+
+    it('clears attention when a future scheduled reply matures, not when created', async () => {
+        const now = spyOn(Date, 'now').mockReturnValue(100_000)
+        const store = new Store(':memory:')
+        const io = {
+            of: () => ({
+                to: () => ({ emit() {}, timeout: () => ({ emit() {} }) }),
+                adapter: { rooms: { get: () => undefined } }
+            })
+        } as never
+        const engine = new SyncEngine(store, io, new RpcRegistry(), { broadcast() {} } as never)
+
+        try {
+            const session = engine.getOrCreateSession(
+                'session-scheduled-handled',
+                { path: '/tmp/project', host: 'localhost', flavor: 'codex' },
+                null,
+                'default'
+            )
+            engine.bumpAttention(session.id)
+            await engine.sendMessage(session.id, {
+                text: 'later',
+                localId: 'scheduled-local-id',
+                scheduledAt: 101_000
+            })
+            expect(engine.getSession(session.id)?.handledRev).toBe(0)
+
+            now.mockReturnValue(102_000)
+            ;(engine as unknown as { expireInactive: () => void }).expireInactive()
+            expect(engine.getSession(session.id)?.handledRev).toBe(1)
+        } finally {
+            engine.stop()
+            now.mockRestore()
+        }
+    })
+
     it('reports session activity when CLI receives a turn-ready event over socket', () => {
         const store = new Store(':memory:')
         const events: SyncEvent[] = []

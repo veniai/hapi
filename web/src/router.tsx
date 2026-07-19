@@ -44,7 +44,7 @@ import { gcChatScrollPositions, readChatScrollPosition } from '@/lib/chat-scroll
 import { clearDraftsAfterSend } from '@/lib/clearDraftsAfterSend'
 import { inactiveSessionCanResume } from '@/lib/sessionResume'
 import { markSessionSeen, getSessionLastSeenAt } from '@/lib/sessionLastSeen'
-import { pickEntryTarget } from '@/lib/read-position-target'
+import { isOptimisticEntryTarget, pickEntryTarget, shouldMarkSessionEntry } from '@/lib/read-position-target'
 import { useSessionBrowserTitle } from '@/hooks/useSessionBrowserTitle'
 import { clearCodexImportedSession, markCodexSessionsImported } from '@/lib/codexImportedSessions'
 import type { Machine, CodexDuplicateSessionGroup, CodexLocalSessionSummary } from '@/types/api'
@@ -225,11 +225,18 @@ function SessionsPage() {
         [selectedSessionId, sessions]
     )
     const isTabVisible = useTabVisible()
+    const markedEntrySessionIdRef = useRef<string | null>(null)
     useEffect(() => {
         if (!selectedSessionId || !selectedSession) {
+            markedEntrySessionIdRef.current = null
             return
         }
-        if (!isTabVisible) {
+        if (!shouldMarkSessionEntry({
+            selectedSessionId,
+            markedSessionId: markedEntrySessionIdRef.current,
+            sessionLoaded: selectedSession !== null,
+            tabVisible: isTabVisible
+        })) {
             return
         }
         // 规则 A (§4.2): explicit entry advances this device's seen attention
@@ -237,7 +244,8 @@ function SessionsPage() {
         // stamping attentionRev clears the dot locally without touching other
         // devices.
         markSessionSeen(selectedSessionId, selectedSession.attentionRev ?? 0)
-    }, [selectedSessionId, selectedSession?.attentionRev, selectedSession?.updatedAt, isTabVisible])
+        markedEntrySessionIdRef.current = selectedSessionId
+    }, [selectedSessionId, selectedSession, isTabVisible])
     const currentCodexSessionId = selectedSession?.metadata?.flavor === 'codex'
         ? (selectedSession.metadata.agentSessionId ?? null)
         : null
@@ -682,6 +690,7 @@ function SessionPage() {
     // 窗口加载 owner（locate 或 latest fallback）。setLocatorTarget 只在 loadInitial
     // 成功（非 busy/failed）后才设 —— busy/failed 时 HappyThread saved restore 接管。
     const [locatorTarget, setLocatorTarget] = useState<{ sessionId: string; messageId: string } | null>(null)
+    const [positionReadySessionId, setPositionReadySessionId] = useState<string | null>(null)
     const lastLoadedRef = useRef<string | null>(null)
     useEffect(() => {
         if (!api || !sessionId) return
@@ -702,12 +711,14 @@ function SessionPage() {
             unreadStartMessageId: session?.lastAttentionMessageId ?? null
         })
         let target: string | null = picked.target
-        if (target?.startsWith('__optimistic__')) target = null
+        if (target && isOptimisticEntryTarget(target)) target = null
         let cancelled = false
-        setLocatorTarget(null)
+        const locatorOwnsPosition = target !== null && picked.source !== 'saved'
+        setLocatorTarget(locatorOwnsPosition && target ? { sessionId, messageId: target } : null)
+        setPositionReadySessionId(sessionId)
         void loadInitial(target).then((located) => {
-            if (!cancelled && located && target) {
-                setLocatorTarget({ sessionId, messageId: target })
+            if (!cancelled && locatorOwnsPosition && !located) {
+                setLocatorTarget(null)
             }
         })
         return () => { cancelled = true }
@@ -1019,6 +1030,7 @@ function SessionPage() {
                     ? locatorTarget.messageId
                     : null
             }
+            initialPositionReady={positionReadySessionId === sessionId}
             onRetryMessage={retryMessage}
             autocompleteSuggestions={getAutocompleteSuggestions}
             availableSlashCommands={slashCommands}
