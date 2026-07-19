@@ -89,9 +89,7 @@ export function useMessages(api: ApiClient | null, sessionId: string | null): {
                 if (result.reason === 'not-found') {
                     clearChatScrollPosition(sessionId)
                 }
-                if (result.reason !== 'busy') {
-                    await fetchLatestMessages(api, sessionId)
-                }
+                await fetchLatestMessages(api, sessionId)
             }
             return result.ok
         }

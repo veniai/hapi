@@ -1089,14 +1089,11 @@ export async function fetchLocatedWindow(
     sessionId: string,
     targetMessageId: string,
     options?: { beforeLimit?: number; afterLimit?: number }
-): Promise<{ ok: true } | { ok: false; reason: 'not-found' | 'busy' | 'failed' }> {
+): Promise<{ ok: true } | { ok: false; reason: 'not-found' | 'failed' }> {
     const initial = getState(sessionId)
-    if (initial.isLoading) {
-        // In-flight latest load (e.g. concurrent SSE-reconnect fetchLatest). Do
-        // NOT treat as not-found — that would wipe the saved anchor. Caller
-        // leaves saved alone and lets the existing load finish.
-        return { ok: false, reason: 'busy' }
-    }
+    // A locator is the entry owner. beginReplacementGeneration invalidates an
+    // older reconnect/latest generation so its late response cannot overwrite
+    // the target window.
     const { generation } = beginReplacementGeneration(sessionId, 'latest', { isLoading: true, warning: null })
     try {
         const window = await api.locateMessageWindow(sessionId, targetMessageId, options) as {

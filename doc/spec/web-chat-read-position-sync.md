@@ -2,7 +2,7 @@
 
 > 项目：`veniai/hapi` fork
 > 基线：`work/current`，2026-07-19
-> 状态：**v12 基础版本已部署；2026-07-19 corrective patch 已修复审查发现的红点、未读锚点、精确恢复与连续阅读偏差，全量机械门通过，已达到 routine deploy 条件。真实双端验收仍待完成。详见 §14。**
+> 状态：**v12 基础版本与 corrective commit `1f0f89e` 已部署，但真实验收发现刷新后 locator 被 latest 请求抢占、异步布局后锚点漂移，故该版本验收失败。本轮 Web 修正已通过全量机械门和本地真实浏览器回归，尚待 routine redeploy 与公网/真实双端复验。详见 §14。**
 > 取代：`Web 双端红点与阅读位置 - Go-ready v2`
 > 触发场景：电脑与手机交替查看、回复多个并行 session；红点用于协同处理，聊天进入后从上次阅读边界继续向下读。
 
@@ -508,6 +508,31 @@ bun run build:web
 - saved winner 保留像素 offset；hub/unread winner 才按 top 定位；缓存命中跳过 locator API。
 - 新消息/继续阅读不滚底；逐段定位 + newer 邻近下沿单页预取；移除 pending-bottom timer 状态机。
 - schema 无变化（12 → 12）。全量 typecheck/test/build:web 已通过；corrective commit、routine redeploy 和 §13 真实设备验收待完成。
+
+### Refresh/restore corrective（2026-07-19，进行中）
+
+`1f0f89e` 部署后的真实验收失败，不能作为 §5 完成证据：
+
+- **刷新后点红点仍停在旧内容/顶部**：初次 SSE connect 启动 `fetchLatestMessages`，同时 route entry 启动 locator；locator 因 `isLoading` 返回 busy 后目标被清除，latest 窗口取得所有权。
+- **位置切换/刷新后漂移**：locator 和 saved restore 在目标 DOM 首次出现时即宣布 settled；其上的 reasoning/markdown 异步展开后，目标继续下移，但持久化已重新开放，漂移位置可能覆盖 durable anchor。
+- **同端精确 offset 被降级**：本地保存选择任意 durable visible message，Hub reporter 只选 agent message；即使两者落在同一消息，稍晚的 Hub 时间也会让 topOffset=0 的共享锚点胜出。
+
+本轮修正：
+
+- 初次 SSE connect 不再为 selected session 启动 latest replacement；locator 可抢占并使已在途 latest generation 失效。
+- locator 与 saved restore 在目标首次出现后拥有一个 1500ms 有界 settle window；ResizeObserver 在窗口内按消息锚点反复校正，settled 前禁止保存和上报。用户滚动、发送、继续阅读会立即取消恢复。
+- 本地保存与 Hub reporter 统一使用 `captureScrollAnchor`；saved/hub 指向同一消息时优先 saved，保留本设备精确 topOffset。
+- 新增 `web/e2e/chat-entry-position.live.spec.ts`：真实 Hub 数据下验证 locator 落顶、手动滚动保存、整页 reload 后同一 anchor offset 误差不超过 1px；read-position POST 在测试中拦截，避免改写共享 fixture。
+
+当前证据（目标代码、部署前）：
+
+- `bun run typecheck:web` ✓
+- 相关 Vitest：67 tests ✓
+- Chromium + 本地 Vite `:5174` + live Hub，session `e371075a-490c-455e-8730-788768784159`：上述 E2E 1/1 passed（14.6s）✓
+- `bun typecheck` ✓
+- `bun run test` ✓（CLI 1313、Web 1345、Shared 114；Hub 全部通过）
+- `bun run build:web` ✓
+- 尚未完成：最终 commit、routine redeploy、公网同 E2E、§13 人工验收。
 
 ### 仍待人（§9.2 live + §13）
 

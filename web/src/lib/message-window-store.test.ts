@@ -833,8 +833,7 @@ describe('fetchLocatedWindow', () => {
         expect(result).toEqual({ ok: false, reason: 'failed' })
     })
 
-    it('returns busy (NOT not-found) when a latest load is in flight', async () => {
-        // Seed an in-flight latest load so isLoading=true.
+    it('locator supersedes an in-flight latest load', async () => {
         const slowApi = {
             locateMessageWindow: vi.fn(async () => ({ messages: [], target: null, olderCursor: null, hasOlder: false, newerCursor: null, hasNewer: false })),
             getMessages: vi.fn(async () => {
@@ -845,7 +844,8 @@ describe('fetchLocatedWindow', () => {
         const p = fetchLatestMessages(slowApi as unknown as ApiClient, SESSION_ID) // sets isLoading
         const result = await fetchLocatedWindow(slowApi as unknown as ApiClient, SESSION_ID, 'target-msg')
         await p
-        expect(result).toEqual({ ok: false, reason: 'busy' })
+        expect(result).toEqual({ ok: true })
+        expect(slowApi.locateMessageWindow).toHaveBeenCalledTimes(1)
     })
 })
 

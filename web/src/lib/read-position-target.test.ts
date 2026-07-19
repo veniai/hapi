@@ -33,6 +33,14 @@ describe('shouldMarkSessionEntry', () => {
 })
 
 describe('pickEntryTarget — §5.1 LWW + §2.3 unread-start', () => {
+    it('keeps the exact local offset when hub reports the same message later', () => {
+        expect(pickEntryTarget({
+            savedMessageId: 'agent-text:same:0', savedCapturedAt: 100,
+            hubMessageId: 'agent-text:same:0', hubLastReadAt: 200,
+            hasUnreadAttention: false, unreadStartMessageId: null
+        })).toEqual({ target: 'agent-text:same:0', source: 'saved' })
+    })
+
     it('prefers the newer of saved vs hub (LWW)', () => {
         // saved newer than hub → saved
         expect(pickEntryTarget({
