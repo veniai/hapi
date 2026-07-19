@@ -1159,8 +1159,10 @@ export async function fetchOlderMessages(api: ApiClient, sessionId: string): Pro
         updateStateForEpochGeneration(sessionId, 'older', generation, epoch, (prev) => {
             const merged = mergeMessages(response.messages, prev.messages)
             const { kept: trimmed, dropped } = trimPreservingQueued(merged, OLDER_LOAD_WINDOW_SIZE, 'prepend')
+            const pending = filterPendingAgainstVisible(prev.pending, trimmed)
             return buildState(prev, {
                 messages: trimmed,
+                pending,
                 ...cursorUpdatesAfterPrependTrim(trimmed, dropped),
                 hasMore: response.page.hasMore,
                 oldestPositionAt: nextBeforeAt,
@@ -1208,8 +1210,10 @@ export async function fetchNewerMessages(api: ApiClient, sessionId: string): Pro
             // Trim keeping the newest slice (append mode drops oldest) so the
             // viewport follows the user forward toward the latest messages.
             const { kept: trimmed, dropped } = trimPreservingQueued(merged, OLDER_LOAD_WINDOW_SIZE, 'append')
+            const pending = filterPendingAgainstVisible(prev.pending, trimmed)
             return buildState(prev, {
                 messages: trimmed,
+                pending,
                 ...cursorUpdatesAfterAppendTrim(trimmed, dropped),
                 hasNewer: stillHasNewer,
                 newestPositionAt: nextAfterAt,
