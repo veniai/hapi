@@ -711,16 +711,23 @@ export function HappyThread(props: {
     // fallback if the target never renders (filtered/grouped message).
     useLayoutEffect(() => {
         const target = props.locatorTargetMessageId
-        if (target) {
-            locatorTargetActiveRef.current = true
-            locatorTargetRetriesRef.current = 0
-            // Drop the saved anchor for THIS mount — target owns initial position.
-            // (localStorage saved is untouched; only the in-memory restore ref.)
-            pendingSavedScrollRef.current = null
-        } else {
+        if (!target) {
             locatorTargetActiveRef.current = false
+            return
         }
-    }, [props.locatorTargetMessageId])
+        // Same-device refresh: locator target IS the saved anchor. Let saved
+        // restore handle it pixel-precise (matching the no-refresh behavior).
+        // Only activate locator scroll mode for the cross-device case (target
+        // came from hub, differs from local saved).
+        const saved = readChatScrollPosition(props.sessionId)
+        if (saved?.anchor?.messageId === target) {
+            locatorTargetActiveRef.current = false
+            return
+        }
+        locatorTargetActiveRef.current = true
+        locatorTargetRetriesRef.current = 0
+        pendingSavedScrollRef.current = null
+    }, [props.locatorTargetMessageId, props.sessionId])
 
     useLayoutEffect(() => {
         const target = props.locatorTargetMessageId
