@@ -695,19 +695,16 @@ function SessionPage() {
         lastLoadedRef.current = sessionId
         const saved = readChatScrollPosition(sessionId)
         const savedMessageId = saved?.anchor?.messageId ?? null
-        const savedAt = saved?.capturedAt ?? 0
         const hubMessageId = session?.lastReadMessageId ?? null
-        const hubAt = session?.lastReadAt ?? 0
-        let target: string | null
-        if (savedMessageId && hubMessageId) {
-            target = savedAt >= hubAt ? savedMessageId : hubMessageId
-        } else {
-            target = savedMessageId ?? hubMessageId
-        }
+        // Prefer the local saved anchor (synchronous, no race). The hub
+        // lastRead is set by a keepalive POST on pagehide which races with the
+        // reload's GET-session — so hub may be stale on refresh and LWW(picked
+        // hub) was landing on the wrong message. Saved is authoritative for the
+        // same device; hub only matters cross-device (when saved is absent).
+        let target: string | null = savedMessageId ?? hubMessageId
         // optimistic ids are temporary (not-yet-confirmed by hub) and aren't in
         // the DB — locating them 404s and wipes the saved anchor. Drop to null
-        // (latest) instead. This is the "位置记不住" root cause: the reporter used
-        // to capture optimistic ids, hub stored them, and re-entry 404'd.
+        // (latest) instead.
         if (target?.startsWith('__optimistic__')) {
             target = null
         }
