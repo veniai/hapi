@@ -138,6 +138,29 @@ describe('scroll anchor helpers', () => {
         viewport.remove()
     })
 
+    it('skips optimistic (not-yet-confirmed) messages — they are not durable anchors', () => {
+        const viewport = document.createElement('div')
+        const optimistic = document.createElement('div')
+        const confirmed = document.createElement('div')
+        optimistic.id = 'hapi-message-__optimistic__abc'
+        confirmed.id = 'hapi-message-11111111-2222-4333-8333-555555555555'
+        const messages = document.createElement('div')
+        messages.className = 'happy-thread-messages'
+        messages.append(optimistic, confirmed)
+        viewport.append(messages)
+        document.body.append(viewport)
+
+        vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue(rect({ top: 0, bottom: 500 }))
+        vi.spyOn(optimistic, 'getBoundingClientRect').mockReturnValue(rect({ top: 10, bottom: 50 }))
+        vi.spyOn(confirmed, 'getBoundingClientRect').mockReturnValue(rect({ top: 60, bottom: 90 }))
+
+        const anchor = captureScrollAnchor(viewport)
+        expect(anchor).not.toBeNull()
+        expect(anchor?.messageId).toBe('11111111-2222-4333-8333-555555555555')
+
+        viewport.remove()
+    })
+
     it('treats upward motion near the bottom as manual scroll intent', () => {
         expect(getScrollIntent({
             scrollTop: 690,

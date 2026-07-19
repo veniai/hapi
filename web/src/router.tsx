@@ -704,6 +704,13 @@ function SessionPage() {
         } else {
             target = savedMessageId ?? hubMessageId
         }
+        // optimistic ids are temporary (not-yet-confirmed by hub) and aren't in
+        // the DB — locating them 404s and wipes the saved anchor. Drop to null
+        // (latest) instead. This is the "位置记不住" root cause: the reporter used
+        // to capture optimistic ids, hub stored them, and re-entry 404'd.
+        if (target?.startsWith('__optimistic__')) {
+            target = null
+        }
         setLocatorTarget(target)
         void loadInitial(target)
     }, [api, sessionId, session, sessionError, loadInitial])
