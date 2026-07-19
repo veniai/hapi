@@ -55,7 +55,7 @@ export function useMessages(api: ApiClient | null, sessionId: string | null): {
      *  locator not-found (target message gone) the saved anchor is cleared and
      *  we fall back to latest. Driven by SessionPage, not an auto effect, so
      *  the target can be picked from saved LWW hub read position. */
-    loadInitial: (targetMessageId: string | null) => Promise<void>
+    loadInitial: (targetMessageId: string | null) => Promise<boolean>
 } {
     const state = useSyncExternalStore(
         useCallback((listener) => {
@@ -78,25 +78,21 @@ export function useMessages(api: ApiClient | null, sessionId: string | null): {
     // instead of always landing at the bottom.
 
     const loadInitial = useCallback(async (targetMessageId: string | null) => {
-        if (!api || !sessionId) return
+        if (!api || !sessionId) return false
         if (targetMessageId) {
             const result = await fetchLocatedWindow(api, sessionId, targetMessageId)
             if (!result.ok) {
                 if (result.reason === 'not-found') {
-                    // Target vanished (deleted / cross-device race). Drop the stale
-                    // saved anchor before falling back.
                     clearChatScrollPosition(sessionId)
                 }
-                // not-found / failed: fall back to latest so the user isn't stuck
-                // on an empty window + "Failed to locate" warning. busy: a load is
-                // already in flight — let it land, don't double-fetch.
                 if (result.reason !== 'busy') {
                     await fetchLatestMessages(api, sessionId)
                 }
             }
-            return
+            return result.ok
         }
         await fetchLatestMessages(api, sessionId)
+        return false
     }, [api, sessionId])
 
     // 冻住落位 thrash：reload/进入 总 fetchLatest（落最新），saved/locator 落位停用。

@@ -674,7 +674,9 @@ function SessionPage() {
 
     // locator 恢复：target = saved ?? hub（saved 优先解 reporter/reload race）。
     // useMessages fetchLatest effect（保底 messages 显示）始终跑；loadInitial 额外定位。
-    const [locatorTarget, setLocatorTarget] = useState<string | null>(null)
+    // locator: target = saved ?? hub。setLocatorTarget 只在 loadInitial 成功（非 busy/failed）
+    // 后才设 —— busy 时 saved restore 接管（跟之前"没问题"一样），避免两头空。
+    const [locatorTarget, setLocatorTarget] = useState<{ sessionId: string; messageId: string } | null>(null)
     const lastLoadedRef = useRef<string | null>(null)
     useEffect(() => {
         if (!api || !sessionId) return
@@ -686,8 +688,14 @@ function SessionPage() {
         const hubMessageId = session?.lastReadMessageId ?? null
         let target: string | null = savedMessageId ?? hubMessageId
         if (target?.startsWith('__optimistic__')) target = null
-        setLocatorTarget(target)
-        void loadInitial(target)
+        let cancelled = false
+        setLocatorTarget(null)
+        void loadInitial(target).then((located) => {
+            if (!cancelled && located && target) {
+                setLocatorTarget({ sessionId, messageId: target })
+            }
+        })
+        return () => { cancelled = true }
     }, [api, sessionId, session, sessionError, loadInitial])
 
     // Tracks the most recent send the hub rejected (4xx/5xx/network), keyed
@@ -991,7 +999,11 @@ function SessionPage() {
             onAtBottomChange={setAtBottom}
             onFetchNewer={fetchNewerMessages}
             hasNewerMessages={messagesHasNewer}
-            locatorTargetMessageId={locatorTarget}
+            locatorTargetMessageId={
+                locatorTarget?.sessionId === sessionId
+                    ? locatorTarget.messageId
+                    : null
+            }
             onRetryMessage={retryMessage}
             autocompleteSuggestions={getAutocompleteSuggestions}
             availableSlashCommands={slashCommands}
