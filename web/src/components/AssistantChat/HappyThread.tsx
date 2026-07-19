@@ -104,19 +104,19 @@ export function captureScrollAnchor(viewport: HTMLElement): ScrollAnchor | null 
     return null
 }
 
-/** Capture the first FULLY-VISIBLE AGENT message id for read-position reporting
- *  (§4.5(a) M11: "首条完全可见的 agent 消息"). Returns null when no agent message
- *  is fully in view — the reporter then keeps the previous anchor (no spurious
- *  update from user/system or partially-visible messages). Distinct from
- *  captureScrollAnchor, which accepts any partially-visible message for saved
- *  scroll restoration. */
+/** Capture the first VISIBLE AGENT message id for read-position reporting
+ *  (§4.5(a) — relaxed from "fully visible" to "visible": a long agent message
+ *  whose bottom is clipped by the viewport is still what the user is reading,
+ *  and reporting the message above it (the old fully-visible rule) made refresh
+ *  land one message too high). Returns null when no agent message is in view;
+ *  the reporter then keeps the previous anchor. */
 export function captureReadPositionAnchor(viewport: HTMLElement): string | null {
     const viewportRect = viewport.getBoundingClientRect()
     const messages = Array.from(viewport.querySelectorAll<HTMLElement>(MESSAGE_ANCHOR_SELECTOR))
     for (const message of messages) {
         if (message.dataset.hapiRole !== 'agent') continue
         const rect = message.getBoundingClientRect()
-        if (rect.top >= viewportRect.top && rect.bottom <= viewportRect.bottom) {
+        if (rect.bottom > viewportRect.top && rect.top < viewportRect.bottom) {
             const id = message.id.startsWith('hapi-message-')
                 ? message.id.slice('hapi-message-'.length)
                 : message.id
