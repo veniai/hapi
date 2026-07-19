@@ -50,6 +50,19 @@ test.describe('read-position refresh', () => {
         console.log('[e2e] BEFORE:', JSON.stringify(before))
         test.skip(!before.first, 'no visible message')
 
+        // clear SW + cache so reload picks up the freshly deployed dist
+        await page.evaluate(async () => {
+            try {
+                if (window.caches) {
+                    const keys = await caches.keys()
+                    await Promise.all(keys.map((k) => caches.delete(k)))
+                }
+                const regs = await navigator.serviceWorker.getRegistrations()
+                await Promise.all(regs.map((r) => r.unregister()))
+            } catch {
+                /* ignore */
+            }
+        })
         await page.reload({ waitUntil: 'domcontentloaded', timeout: 60_000 })
         await page.waitForSelector('.happy-thread-messages > [id]', { timeout: 30_000 })
         await page.waitForTimeout(9000)
