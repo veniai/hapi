@@ -393,7 +393,8 @@ export function HappyThread(props: {
     const onFlushPendingRef = useRef(props.onFlushPending)
     const forceScrollTokenRef = useRef(props.forceScrollToken)
     const lastScrollTopRef = useRef(0)
-    const pendingSavedScrollRef = useRef<PersistedChatScrollPosition | null>(readChatScrollPosition(props.sessionId))
+    // 冻住 saved restore（落位停用）：mount 不读 saved，reload 总落最新。
+    const pendingSavedScrollRef = useRef<PersistedChatScrollPosition | null>(null)
     // Bounded re-verification state (see verifySavedRestore).
     const savedRestoreVerificationRef = useRef<{ anchor: ScrollAnchor; ticksRemaining: number; stableTicks: number; deadline: number } | null>(null)
     // Initial-position target mode: when locatorTargetMessageId is set, the

@@ -1,4 +1,4 @@
-import { useCallback, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useSyncExternalStore } from 'react'
 import type { ApiClient } from '@/api/client'
 import type { DecryptedMessage } from '@/types/api'
 import {
@@ -97,6 +97,13 @@ export function useMessages(api: ApiClient | null, sessionId: string | null): {
             return
         }
         await fetchLatestMessages(api, sessionId)
+    }, [api, sessionId])
+
+    // 冻住落位 thrash：reload/进入 总 fetchLatest（落最新），saved/locator 落位停用。
+    // read-position 临时停用（hub locator API + reporter 保留），等落位理顺再接回。
+    useEffect(() => {
+        if (!api || !sessionId) return
+        void fetchLatestMessages(api, sessionId)
     }, [api, sessionId])
 
     const loadMore = useCallback(async () => {
