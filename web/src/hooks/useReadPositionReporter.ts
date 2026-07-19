@@ -24,7 +24,12 @@ export function useReadPositionReporter({
     const sessionIdRef = useRef(sessionId)
     sessionIdRef.current = sessionId
     const lastKnownRef = useRef(lastKnownHubReadAt)
-    lastKnownRef.current = lastKnownHubReadAt
+    // Sync from the prop only when it changes — NOT every render. An unconditional
+    // assignment here would clobber the CAS revision advanced by the flush
+    // response (.then below) on every re-render, making the advance no-op.
+    useEffect(() => {
+        lastKnownRef.current = lastKnownHubReadAt
+    }, [lastKnownHubReadAt])
     // Stable observedAt per messageId (§4.5(a)): reusing the same timestamp for
     // the same message avoids refreshing the hub revision on every flush, which
     // could overwrite a genuinely newer remote position.
