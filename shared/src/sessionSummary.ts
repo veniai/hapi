@@ -60,6 +60,7 @@ export type SessionSummary = {
     /** Epoch ms of the soonest uninvoked future scheduled message, or null. */
     nextScheduledAt: number | null
     model: string | null
+    modelReasoningEffort?: string | null
     effort: string | null
     attentionRev: number
     handledRev: number
@@ -150,6 +151,7 @@ export function toSessionSummary(session: Session): SessionSummary {
         futureScheduledMessageCount: 0,
         nextScheduledAt: null,
         model: session.model,
+        modelReasoningEffort: session.modelReasoningEffort,
         effort: session.effort,
         attentionRev: session.attentionRev ?? 0,
         handledRev: session.handledRev ?? 0
