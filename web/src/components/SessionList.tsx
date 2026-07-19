@@ -663,8 +663,8 @@ function SessionItem(props: {
             : null,
         [s, showDetailedStatus, lastSeenAt]
     )
-    // selected 行 suppress attention（归调用方，spec §5）
-    const attention = selected ? null : rawAttention
+    // 当前 session 也画红点（用户发消息后 agent 回复了但没滚到底 → 红点提示"有新"）
+    const attention = rawAttention
     const attentionLabel = attention ? getAttentionLabel(attention, t) : null
     const scheduledLabel = s.futureScheduledMessageCount > 1
         ? t('session.item.scheduledMessages', { count: s.futureScheduledMessageCount })
