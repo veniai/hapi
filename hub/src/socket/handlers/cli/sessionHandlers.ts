@@ -75,7 +75,7 @@ export type SessionHandlersDeps = {
     /** Raise the session's attention revision (§2.1/§4.1). Wired to
      *  syncEngine.bumpAttention — bumps on agent-result content and on a
      *  permission/input request appearing. */
-    onAttentionBump?: (sessionId: string) => void
+    onAttentionBump?: (sessionId: string, messageId?: string) => void
     /** Delegates session-end immediate-queue sweep to the MessageService layer. */
     onSweepImmediateQueued?: (sessionId: string, now: number) => void
     /** Drops the queued-thinking grace so synchronous CLI handlers (e.g. slash
@@ -122,8 +122,9 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
         }
         // §4.1 unread attention: an agent turn that produced a ready result.
         // Strictly agent-only — user text must NOT raise attention (§4.1/§3.1.8).
+        // Carry the message id so the web can use it as the unread-start hint (§2.3).
         if (isAgentResultContent(content)) {
-            onAttentionBump?.(sid)
+            onAttentionBump?.(sid, msg.id)
         }
 
         const todos = extractTodoWriteTodosFromMessageContent(content)

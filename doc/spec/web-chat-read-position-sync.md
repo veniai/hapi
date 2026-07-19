@@ -452,9 +452,14 @@ bun run build:web
 2. **unread 信号**：用 agent `ready` 事件（turn 完成）作 bump，沿用旧 updatedAt 路径已用的过滤（`shouldRecordSessionActivity` 对 agent 只认 ready）。若某 agent flavor 不发 ready 事件，其 unread 可能不 bump —— 与旧逻辑等价，非回归。background bump 在 0→N（启动）而非完成，对齐旧 UX（任务跑着就亮）。
 3. **Goal B 待人批**：含 migration v12，live 部署需显式批准（standing auth 不预授权 migration）。部署前按 §10.2 验 deploy HEAD == target SHA + `user_version` 10→12 + integrity_check。
 
-### 待实现（后续 G2–G5）
+### G2 — 未读起点（§2.3 / §5.1）
 
-- **G2（§2.3 / §5.1 未读起点）**：当前无锚点 + 有红点时仍落 latest，未落未读起点。
+**已实现**：hub 在 `bumpAttention` 带 `messageId`（agent ready 事件的消息 id）时，cache-only 记 `lastAttentionMessageId`（不入库，重启清空——可接受，重启后 web 走 saved/hub 锚点或 latest）。web entry（`router.tsx`）target 取 `saved ?? hub ?? (hasUnreadAttention ? lastAttentionMessageId : null)`——无锚点 + 有红点时落未读起点，不跳 latest。测试：`attentionRev.test.ts` 加「records the unread-start message id」一例。hub 535/web 1320 全绿。
+
+**已知偏离**：`lastAttentionMessageId` 是 agent ready 事件消息（§2.3 偏好「触发本轮的 user 消息」——取 ready 事件而非其前的 user msg，是务实折中，落地结果边界、向下读）。hub 重启后丢失 → 该窄场景退化为 latest。
+
+### 待实现（后续 G3–G5）
+
 - **G3（§3.2.7 / §8.2 单一进入事务）**：`useMessages` 自动 `fetchLatest` effect 与 `SessionPage.loadInitial(locator)` 仍并行（`isLoading` guard 缓解未重构）；`locatorTargetMessageId` 实为 `saved ?? hub`（非 LWW，`capturedAt` 未用）。
 - **G4（§3.2.4 跨端恢复）**：hub `lastRead` 已在 entry 消费（`router.tsx:688`），但 saved-first + reporter POST/reload GET race 未根治。
 - **G5（§7 性能证据 / §9.2 双 context e2e）**：无 Playwright trace 基线对比；双 context e2e 骨架已写但需 live 环境跑全。

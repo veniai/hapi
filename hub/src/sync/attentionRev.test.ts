@@ -163,4 +163,16 @@ describe('attention revision — hub (web-chat-read-position-sync §2.1/§3.1/§
         expect(stored.attentionRev).toBe(2)
         expect(stored.handledRev).toBe(1)
     })
+
+    it('records the unread-start message id when bump carries one (§2.3)', () => {
+        const { cache, session } = setup()
+        cache.bumpAttention(session.id, { messageId: 'msg-ready-1' })
+        expect(cache.getSession(session.id)?.lastAttentionMessageId).toBe('msg-ready-1')
+        // A later bump without a messageId does not clobber the prior hint.
+        cache.bumpAttention(session.id)
+        expect(cache.getSession(session.id)?.lastAttentionMessageId).toBe('msg-ready-1')
+        // refreshSession preserves the cache-only hint (it is not stored).
+        cache.refreshSession(session.id)
+        expect(cache.getSession(session.id)?.lastAttentionMessageId).toBe('msg-ready-1')
+    })
 })
