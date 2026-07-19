@@ -29,7 +29,9 @@ describe('migration v10 → v11 (last_read_message_id + last_read_at)', () => {
     it('migration is idempotent ( reopening V11 DB is stable)', () => {
         const store = new Store(':memory:')
         const uv1 = (store['db'].prepare('PRAGMA user_version').get() as { user_version: number }).user_version
-        expect(uv1).toBe(11)
+        // SCHEMA_VERSION advanced to 12 (attention/handled rev); a fresh DB
+        // lands at the current target, not 11.
+        expect(uv1).toBe(12)
         store.close()
     })
 })

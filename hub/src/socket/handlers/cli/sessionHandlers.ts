@@ -8,7 +8,7 @@ import type { SyncEvent } from '../../../sync/syncEngine'
 import { extractTodoWriteTodosFromMessageContent } from '../../../sync/todos'
 import { extractTeamStateFromMessageContent, applyTeamStateDelta } from '../../../sync/teams'
 import { extractBackgroundTaskDelta } from '../../../sync/backgroundTasks'
-import { shouldRecordSessionActivity } from '../../../sync/sessionActivity'
+import { shouldRecordSessionActivity, isAgentResultContent, countPendingRequests } from '../../../sync/sessionActivity'
 import type { CliSocketWithData } from '../../socketTypes'
 import type { SessionEndReason } from '@hapi/protocol'
 import type { AccessErrorReason, AccessResult } from './types'
@@ -72,6 +72,10 @@ export type SessionHandlersDeps = {
     onWebappEvent?: (event: SyncEvent) => void
     onBackgroundTaskDelta?: (sessionId: string, delta: { started: number; completed: number }) => void
     onSessionActivity?: (sessionId: string, updatedAt: number) => void
+    /** Raise the session's attention revision (§2.1/§4.1). Wired to
+     *  syncEngine.bumpAttention — bumps on agent-result content and on a
+     *  permission/input request appearing. */
+    onAttentionBump?: (sessionId: string) => void
     /** Delegates session-end immediate-queue sweep to the MessageService layer. */
     onSweepImmediateQueued?: (sessionId: string, now: number) => void
     /** Drops the queued-thinking grace so synchronous CLI handlers (e.g. slash
@@ -80,7 +84,7 @@ export type SessionHandlersDeps = {
 }
 
 export function registerSessionHandlers(socket: CliSocketWithData, deps: SessionHandlersDeps): void {
-    const { store, resolveSessionAccess, emitAccessError, onSessionAlive, onSessionReady, onSessionEnd, onWebappEvent, onBackgroundTaskDelta, onSessionActivity, onSweepImmediateQueued, onMessagesConsumed } = deps
+    const { store, resolveSessionAccess, emitAccessError, onSessionAlive, onSessionReady, onSessionEnd, onWebappEvent, onBackgroundTaskDelta, onSessionActivity, onAttentionBump, onSweepImmediateQueued, onMessagesConsumed } = deps
 
     socket.on('message', (data: unknown) => {
         const parsed = messageSchema.safeParse(data)
@@ -115,6 +119,11 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
         const msg = store.messages.addMessage(sid, content, localId)
         if (shouldRecordSessionActivity(content)) {
             onSessionActivity?.(sid, msg.createdAt)
+        }
+        // §4.1 unread attention: an agent turn that produced a ready result.
+        // Strictly agent-only — user text must NOT raise attention (§4.1/§3.1.8).
+        if (isAgentResultContent(content)) {
+            onAttentionBump?.(sid)
         }
 
         const todos = extractTodoWriteTodosFromMessageContent(content)
@@ -240,6 +249,10 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
             return
         }
 
+        // §4.1 permission/input attention: detect the empty→non-empty requests
+        // transition using the pre-update cached state vs the incoming payload.
+        const prevRequestCount = countPendingRequests(sessionAccess.value.agentState)
+
         const result = store.sessions.updateSessionAgentState(
             sid,
             agentState,
@@ -255,6 +268,9 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
         }
 
         if (result.result === 'success') {
+            if (prevRequestCount === 0 && countPendingRequests(agentState) > 0) {
+                onAttentionBump?.(sid)
+            }
             const update = {
                 id: randomUUID(),
                 seq: Date.now(),

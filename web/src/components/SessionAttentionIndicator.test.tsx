@@ -31,6 +31,8 @@ function makeSummary(overrides: Partial<SessionSummary> & { id: string }): Sessi
         effort: null,
         lastReadMessageId: null,
         lastReadAt: null,
+        attentionRev: 0,
+        handledRev: 0,
         ...overrides
     }
 }

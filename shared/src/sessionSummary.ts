@@ -63,6 +63,8 @@ export type SessionSummary = {
     effort: string | null
     lastReadMessageId: string | null
     lastReadAt: number | null
+    attentionRev: number
+    handledRev: number
 }
 
 export function getPendingRequests(
@@ -152,6 +154,8 @@ export function toSessionSummary(session: Session): SessionSummary {
         model: session.model,
         effort: session.effort,
         lastReadMessageId: session.lastReadMessageId ?? null,
-        lastReadAt: session.lastReadAt ?? null
+        lastReadAt: session.lastReadAt ?? null,
+        attentionRev: session.attentionRev ?? 0,
+        handledRev: session.handledRev ?? 0
     }
 }

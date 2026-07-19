@@ -23,7 +23,7 @@ export { PushStore } from './pushStore'
 export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
 
-const SCHEMA_VERSION: number = 11
+const SCHEMA_VERSION: number = 12
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -125,6 +125,7 @@ export class Store {
             8: () => this.migrateFromV8ToV9(),
             9: () => this.migrateFromV9ToV10(),
             10: () => this.migrateFromV10ToV11(),
+            11: () => this.migrateFromV11ToV12(),
         })
 
         if (currentVersion === 0) {
@@ -195,7 +196,9 @@ export class Store {
                 active_at INTEGER,
                 seq INTEGER DEFAULT 0,
                 last_read_message_id TEXT,
-                last_read_at INTEGER
+                last_read_at INTEGER,
+                attention_rev INTEGER NOT NULL DEFAULT 0,
+                handled_rev INTEGER NOT NULL DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS idx_sessions_tag ON sessions(tag);
             CREATE INDEX IF NOT EXISTS idx_sessions_tag_namespace ON sessions(tag, namespace);
@@ -446,6 +449,24 @@ export class Store {
         }
         if (!columns.has('last_read_at')) {
             this.db.exec('ALTER TABLE sessions ADD COLUMN last_read_at INTEGER')
+        }
+    }
+
+    // V11 → V12: per-session monotonic attention revision + shared handled
+    // revision (web-chat-read-position-sync §2.1/§3.1.4). attention_rev bumps
+    // on attention-worthy events (agent result / permission-input / background
+    // start); handled_rev advances to attention_rev on a successful send so the
+    // red dot clears on ALL devices. Both default 0 — existing rows start
+    // "caught up" and only light up on events after this migration. See
+    // doc/spec/web-chat-read-position-sync.md.
+    private migrateFromV11ToV12(): void {
+        const columns = this.getSessionColumnNames()
+        if (columns.size === 0) return
+        if (!columns.has('attention_rev')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN attention_rev INTEGER NOT NULL DEFAULT 0')
+        }
+        if (!columns.has('handled_rev')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN handled_rev INTEGER NOT NULL DEFAULT 0')
         }
     }
 

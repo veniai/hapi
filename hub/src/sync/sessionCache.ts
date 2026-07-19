@@ -173,7 +173,9 @@ export class SessionCache {
             permissionMode: existing?.permissionMode ?? metadata?.preferredPermissionMode,
             collaborationMode: existing?.collaborationMode,
             lastReadMessageId: stored.lastReadMessageId,
-            lastReadAt: stored.lastReadAt
+            lastReadAt: stored.lastReadAt,
+            attentionRev: stored.attentionRev,
+            handledRev: stored.handledRev
         }
 
         this.sessions.set(sessionId, session)
@@ -351,11 +353,64 @@ export class SessionCache {
         if (next === prev) return
 
         session.backgroundTaskCount = next
+        // §4.1: a background task starting (0→N) is a new attention-worthy
+        // result. Bump silently and fold attentionRev into this same patch so
+        // clients see the count + the new red-dot revision atomically.
+        const attentionRev = prev === 0 && next > 0
+            ? this.bumpAttention(sessionId, { silent: true })
+            : null
         this.publisher.emit({
             type: 'session-updated',
             sessionId,
-            data: { backgroundTaskCount: next } satisfies SessionPatch
+            data: {
+                backgroundTaskCount: next,
+                ...(attentionRev !== null ? { attentionRev } : {})
+            } satisfies SessionPatch
         })
+    }
+
+    /** Bump the session's attention revision (web-chat-read-position-sync §2.1).
+     *  Atomically ++attention_rev in the store, mirrors it into the cached
+     *  Session, and (unless `silent`) broadcasts a session-updated patch so
+     *  every device can re-evaluate its red dot. Returns the new rev, or null
+     *  if the session does not exist. */
+    bumpAttention(sessionId: string, options?: { silent?: boolean }): number | null {
+        const session = this.sessions.get(sessionId) ?? this.refreshSession(sessionId)
+        if (!session) return null
+        const nextRev = this.store.sessions.bumpAttentionRev(sessionId, session.namespace)
+        if (nextRev === null) return null
+        session.attentionRev = nextRev
+        if (!options?.silent) {
+            this.publisher.emit({
+                type: 'session-updated',
+                sessionId,
+                namespace: session.namespace,
+                data: { attentionRev: nextRev } satisfies SessionPatch
+            })
+        }
+        return nextRev
+    }
+
+    /** Advance the shared handled revision to the current attention revision
+     *  (§3.1.4 — a successful send on any device clears the red dot on ALL
+     *  devices). Idempotent: if handled already meets attention (no new
+     *  attention-worthy event since the last send), nothing is emitted. Returns
+     *  null if the session does not exist. */
+    advanceHandled(sessionId: string): { attentionRev: number; changed: boolean } | null {
+        const session = this.sessions.get(sessionId) ?? this.refreshSession(sessionId)
+        if (!session) return null
+        const result = this.store.sessions.advanceHandledRev(sessionId, session.namespace)
+        if (!result) return null
+        session.handledRev = result.attentionRev
+        if (result.changed) {
+            this.publisher.emit({
+                type: 'session-updated',
+                sessionId,
+                namespace: session.namespace,
+                data: { handledRev: result.attentionRev } satisfies SessionPatch
+            })
+        }
+        return result
     }
 
     recordSessionActivity(sessionId: string, updatedAt: number): void {

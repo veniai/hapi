@@ -8,6 +8,8 @@ import {
     getSessionByNamespace,
     getSessions,
     getSessionsByNamespace,
+    advanceHandledRev,
+    bumpAttentionRev,
     setSessionEffort,
     setSessionReadPosition,
     setSessionModel,
@@ -57,6 +59,16 @@ export class SessionStore {
         namespace: string
     ): VersionedUpdateResult<unknown | null> {
         return updateSessionAgentState(this.db, id, agentState, expectedVersion, namespace)
+    }
+
+    /** @see bumpAttentionRev — atomically ++attention_rev, returns new value or null. */
+    bumpAttentionRev(id: string, namespace: string): number | null {
+        return bumpAttentionRev(this.db, id, namespace)
+    }
+
+    /** @see advanceHandledRev — set handled_rev = attention_rev; idempotent. */
+    advanceHandledRev(id: string, namespace: string): { attentionRev: number; changed: boolean } | null {
+        return advanceHandledRev(this.db, id, namespace)
     }
 
     setSessionTodos(id: string, todos: unknown, todosUpdatedAt: number, namespace: string): boolean {

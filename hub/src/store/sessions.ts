@@ -154,6 +154,8 @@ type DbSessionRow = {
     seq: number
     last_read_message_id: string | null
     last_read_at: number | null
+    attention_rev: number
+    handled_rev: number
 }
 
 function toStoredSession(row: DbSessionRow): StoredSession {
@@ -180,7 +182,9 @@ function toStoredSession(row: DbSessionRow): StoredSession {
         activeAt: row.active_at,
         seq: row.seq,
         lastReadMessageId: row.last_read_message_id,
-        lastReadAt: row.last_read_at
+        lastReadAt: row.last_read_at,
+        attentionRev: row.attention_rev,
+        handledRev: row.handled_rev
     }
 }
 
@@ -535,6 +539,56 @@ export function setSessionReadPosition(
           AND (last_read_at = @expectedLastReadAt OR @expectedLastReadAt IS NULL)
     `).run({ id, namespace, messageId, observedAt, expectedLastReadAt })
     return result.changes === 1 ? { result: 'success' } : { result: 'stale' }
+}
+
+/** Atomically increment a session's attention revision and return the new
+ *  value (web-chat-read-position-sync §2.1). Called by the hub at
+ *  attention-worthy transitions: agent result content arriving, a
+ *  permission/input request appearing, a background task starting. Returns
+ *  null when the session does not exist so callers can no-op cleanly.
+ *
+ *  Does NOT bump `seq` or `updated_at`: the red-dot revision is a separate
+ *  concern from session-activity ordering, and the caller (sessionCache)
+ *  owns propagating the new value to the cached `Session` + SSE. */
+export function bumpAttentionRev(
+    db: Database,
+    id: string,
+    namespace: string
+): number | null {
+    const result = db.prepare(`
+        UPDATE sessions
+        SET attention_rev = attention_rev + 1
+        WHERE id = @id AND namespace = @namespace
+    `).run({ id, namespace })
+    if (result.changes !== 1) return null
+    const row = db.prepare(
+        'SELECT attention_rev AS r FROM sessions WHERE id = ?'
+    ).get(id) as { r: number } | undefined
+    return row?.r ?? null
+}
+
+/** Advance the shared handled revision to the current attention revision
+ *  (§3.1.4). A successful send on any device marks everything observed up to
+ *  now as globally handled, clearing the red dot on ALL devices. Idempotent:
+ *  if handled already meets attention (no new attention-worthy event since the
+ *  last send/seen), nothing changes and `changed` is false. Returns null when
+ *  the session does not exist. */
+export function advanceHandledRev(
+    db: Database,
+    id: string,
+    namespace: string
+): { attentionRev: number; changed: boolean } | null {
+    const result = db.prepare(`
+        UPDATE sessions
+        SET handled_rev = attention_rev
+        WHERE id = @id AND namespace = @namespace
+          AND handled_rev < attention_rev
+    `).run({ id, namespace })
+    const row = db.prepare(
+        'SELECT attention_rev AS a, handled_rev AS h FROM sessions WHERE id = ? AND namespace = ?'
+    ).get(id, namespace) as { a: number; h: number } | undefined
+    if (!row) return null
+    return { attentionRev: row.a, changed: result.changes === 1 }
 }
 
 export function setSessionEffort(

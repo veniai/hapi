@@ -22,6 +22,8 @@ export type StoredSession = {
     seq: number
     lastReadMessageId: string | null
     lastReadAt: number | null
+    attentionRev: number
+    handledRev: number
 }
 
 export type StoredMachine = {

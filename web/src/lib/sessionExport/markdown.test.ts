@@ -30,6 +30,8 @@ function makeExport(messages: HapiSessionExport['messages']): HapiSessionExport 
             effort: null,
         lastReadMessageId: null,
         lastReadAt: null,
+        attentionRev: 0,
+        handledRev: 0,
             serviceTier: null,
             permissionMode: 'default',
             collaborationMode: 'default'
