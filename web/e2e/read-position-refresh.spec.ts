@@ -47,7 +47,12 @@ test.describe('read-position refresh', () => {
         })
         await page.waitForTimeout(1500)
         const before = await readFirstVisible(page)
+        const saved = await page.evaluate(
+            (sid) => localStorage.getItem(`hapi.chat-scroll.v2.${sid}`),
+            sessionId,
+        )
         console.log('[e2e] BEFORE:', JSON.stringify(before))
+        console.log('[e2e] saved:', saved)
         test.skip(!before.first, 'no visible message')
 
         // clear SW + cache so reload picks up the freshly deployed dist

@@ -711,22 +711,17 @@ export function HappyThread(props: {
     // fallback if the target never renders (filtered/grouped message).
     useLayoutEffect(() => {
         const target = props.locatorTargetMessageId
-        if (!target) {
+        if (target) {
+            // Activate locator mode for ANY target (saved or hub). Saved pixel
+            // offset restore proved unstable on refresh (layout timing left it
+            // ~1 message off); landing the target message at viewport top is
+            // message-accurate, which is what "位置记住" actually needs.
+            locatorTargetActiveRef.current = true
+            locatorTargetRetriesRef.current = 0
+            pendingSavedScrollRef.current = null
+        } else {
             locatorTargetActiveRef.current = false
-            return
         }
-        // Same-device refresh: locator target IS the saved anchor. Let saved
-        // restore handle it pixel-precise (matching the no-refresh behavior).
-        // Only activate locator scroll mode for the cross-device case (target
-        // came from hub, differs from local saved).
-        const saved = readChatScrollPosition(props.sessionId)
-        if (saved?.anchor?.messageId === target) {
-            locatorTargetActiveRef.current = false
-            return
-        }
-        locatorTargetActiveRef.current = true
-        locatorTargetRetriesRef.current = 0
-        pendingSavedScrollRef.current = null
     }, [props.locatorTargetMessageId, props.sessionId])
 
     useLayoutEffect(() => {
