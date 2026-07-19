@@ -293,7 +293,10 @@ export const SessionPatchSchema = z.object({
     collaborationMode: CodexCollaborationModeSchema.optional(),
     backgroundTaskCount: z.number().optional(),
     attentionRev: z.number().optional(),
-    handledRev: z.number().optional()
+    handledRev: z.number().optional(),
+    // §2.3 unread-start hint — included so targeted session-updated patches can
+    // refresh the web's cached session detail without waiting for a refetch.
+    lastAttentionMessageId: z.string().nullable().optional()
 }).strict()
 
 export type SessionPatch = z.infer<typeof SessionPatchSchema>
