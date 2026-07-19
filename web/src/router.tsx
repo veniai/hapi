@@ -40,11 +40,11 @@ import { queryKeys } from '@/lib/query-keys'
 import { useToast } from '@/lib/toast-context'
 import { useTranslation } from '@/lib/use-translation'
 import { fetchLatestMessages, gcMessageWindows, seedMessageWindowFromSession } from '@/lib/message-window-store'
-import { gcChatScrollPositions, readChatScrollPosition } from '@/lib/chat-scroll-store'
+import { gcChatScrollPositions } from '@/lib/chat-scroll-store'
 import { clearDraftsAfterSend } from '@/lib/clearDraftsAfterSend'
 import { inactiveSessionCanResume } from '@/lib/sessionResume'
-import { markSessionSeen, getSessionLastSeenAt } from '@/lib/sessionLastSeen'
-import { isOptimisticEntryTarget, pickEntryTarget, shouldMarkSessionEntry } from '@/lib/read-position-target'
+import { markSessionSeen } from '@/lib/sessionLastSeen'
+import { shouldMarkSessionEntry } from '@/lib/read-position-target'
 import { useSessionBrowserTitle } from '@/hooks/useSessionBrowserTitle'
 import { clearCodexImportedSession, markCodexSessionsImported } from '@/lib/codexImportedSessions'
 import type { Machine, CodexDuplicateSessionGroup, CodexLocalSessionSummary } from '@/types/api'
@@ -680,48 +680,18 @@ function SessionPage() {
         messagesVersion,
         flushPending,
         setAtBottom,
-        loadInitial,
         hasNewer: messagesHasNewer,
         fetchNewer: fetchNewerMessages,
     } = useMessages(api, sessionId)
 
-    // locator 恢复：target = LWW(saved, hub) ?? unread-start。单一进入事务
-    // （§3.2.7）：useMessages 不再有自动 fetchLatest effect，loadInitial 是唯一
-    // 窗口加载 owner（locate 或 latest fallback）。
-    const [locatorTarget, setLocatorTarget] = useState<{ sessionId: string; messageId: string } | null>(null)
+    // 回退到 spec 之前：进入 session 即落最新（useMessages 的 fetchLatest effect
+    // 负责）。阅读位置/locator entry target（saved/LWW/unread-start）整体退掉；
+    // 只标记 position-ready，让 HappyThread 走默认的「落底」。红点 G1 保留。
     const [positionReadySessionId, setPositionReadySessionId] = useState<string | null>(null)
-    const lastLoadedRef = useRef<string | null>(null)
     useEffect(() => {
         if (!api || !sessionId) return
-        if (lastLoadedRef.current === sessionId) return
-        if (!session && !sessionError) return
-        lastLoadedRef.current = sessionId
-        const saved = readChatScrollPosition(sessionId)
-        const hasUnreadAttention = !!session
-            && (session.attentionRev ?? 0) > Math.max(getSessionLastSeenAt(sessionId), session.handledRev ?? 0)
-        // §5.1 entry target pick (LWW of saved vs hub, else unread-start, else
-        // latest). Centralized + unit-tested in read-position-target.ts.
-        const picked = pickEntryTarget({
-            savedMessageId: saved?.anchor?.messageId ?? null,
-            savedCapturedAt: saved?.capturedAt,
-            hubMessageId: session?.lastReadMessageId ?? null,
-            hubLastReadAt: session?.lastReadAt ?? undefined,
-            hasUnreadAttention,
-            unreadStartMessageId: session?.lastAttentionMessageId ?? null
-        })
-        let target: string | null = picked.target
-        if (target && isOptimisticEntryTarget(target)) target = null
-        let cancelled = false
-        const locatorOwnsPosition = target !== null && picked.source !== 'saved'
-        setLocatorTarget(locatorOwnsPosition && target ? { sessionId, messageId: target } : null)
         setPositionReadySessionId(sessionId)
-        void loadInitial(target).then((located) => {
-            if (!cancelled && locatorOwnsPosition && !located) {
-                setLocatorTarget(null)
-            }
-        })
-        return () => { cancelled = true }
-    }, [api, sessionId, session, sessionError, loadInitial])
+    }, [api, sessionId])
 
     // Tracks the most recent send the hub rejected (4xx/5xx/network), keyed
     // by the session the failed POST actually targeted (post-resolveSessionId).
@@ -1024,11 +994,7 @@ function SessionPage() {
             onAtBottomChange={setAtBottom}
             onFetchNewer={fetchNewerMessages}
             hasNewerMessages={messagesHasNewer}
-            locatorTargetMessageId={
-                locatorTarget?.sessionId === sessionId
-                    ? locatorTarget.messageId
-                    : null
-            }
+            locatorTargetMessageId={null}
             initialPositionReady={positionReadySessionId === sessionId}
             onRetryMessage={retryMessage}
             autocompleteSuggestions={getAutocompleteSuggestions}

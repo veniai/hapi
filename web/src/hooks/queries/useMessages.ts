@@ -97,12 +97,13 @@ export function useMessages(api: ApiClient | null, sessionId: string | null): {
         return false
     }, [api, sessionId])
 
-    // §3.2.7 单一进入事务：NO auto-fetchLatest effect. SessionPage drives the
-    // sole entry load via loadInitial, which picks the target (saved/hub/unread)
-    // and loads exactly one window (locate, or latest as fallback). A parallel
-    // auto-fetchLatest here was the double-load race (commit 68e11ca re-added it
-    // as a "保底" — loadInitial's fetchLatest fallback now provides that guarantee
-    // without competing for the window).
+    // 回退到 spec 之前：进入 session 总 fetchLatest（落最新）。
+    // 阅读位置/locator 那套（saved/locator/unread-start entry target、reporter）
+    // 整体退掉——它造成了卡顿。红点 G1（attentionRev/handledRev）保留。
+    useEffect(() => {
+        if (!api || !sessionId) return
+        void fetchLatestMessages(api, sessionId)
+    }, [api, sessionId])
 
     const loadMore = useCallback(async () => {
         if (!api || !sessionId) return
