@@ -88,3 +88,18 @@ export function getSessionAttentionLabelKey(attention: SessionAttention): string
             return 'session.item.newActivity'
     }
 }
+
+/** Red-dot G1 gate: stamp this device's seen revision once per actual route
+ *  entry — only when a session is selected, its data has loaded, the tab is
+ *  visible, and this entry has not already been stamped. */
+export function shouldMarkSessionEntry(input: {
+    selectedSessionId: string | null
+    markedSessionId: string | null
+    sessionLoaded: boolean
+    tabVisible: boolean
+}): boolean {
+    return input.selectedSessionId !== null
+        && input.sessionLoaded
+        && input.tabVisible
+        && input.markedSessionId !== input.selectedSessionId
+}
