@@ -2,7 +2,7 @@
 
 > 项目：`veniai/hapi` fork
 > 基线：`work/current`，2026-07-19
-> 状态：**v12 基础版本与 corrective commit `1f0f89e` 已部署，但真实验收发现刷新后 locator 被 latest 请求抢占、异步布局后锚点漂移，故该版本验收失败。本轮 Web 修正已通过全量机械门和本地真实浏览器回归，尚待 routine redeploy 与公网/真实双端复验。详见 §14。**
+> 状态：**本文 §14 实现状态与 §3.2.5 跨端语义已过时。经调查，阅读位置恢复实为 TanStack Router `scrollRestoration`（非本文设计那套，已被 commit `5ffc151` revert）；跨端 §3.2.5 降级 deferred。现状、清理方案、migration v12→v13 见 [`web-chat-read-position-cleanup.md`](./web-chat-read-position-cleanup.md)。§14 G1–G5 留作历史记录。**
 > 取代：`Web 双端红点与阅读位置 - Go-ready v2`
 > 触发场景：电脑与手机交替查看、回复多个并行 session；红点用于协同处理，聊天进入后从上次阅读边界继续向下读。
 
@@ -435,6 +435,8 @@ bun run build:web
 ## 14. 实现状态（按 commit 增量，诚实记录）
 
 > 本节记录各块相对契约的落地状态与已知偏离，供后续接手者验证。不替代上面的验收矩阵。
+>
+> **注（2026-07-20）：以下 G1–G5 为历史记录。阅读位置恢复现状 = TanStack Router `scrollRestoration`，§3.2.5 跨端降级 deferred，详见 [`web-chat-read-position-cleanup.md`](./web-chat-read-position-cleanup.md)。G1（红点 attentionRev/handledRev）仍有效。**
 
 ### G1 — 红点 revision 模型 + 发送两端灭（§2.1 / §3.1 / §4）
 
