@@ -91,11 +91,7 @@ export async function runKimi(opts: {
             return;
         }
         sessionInstance.setPermissionMode(currentPermissionMode);
-        // Report the resolved model (with machineDefault fallback), not the
-        // user's explicit pick — sessionModel is null while following the
-        // default, and reporting null leaves the hub with session.model=null
-        // so the web SessionHeader can't surface the model label.
-        sessionInstance.setModel(resolvedModel);
+        sessionInstance.setModel(sessionModel);
         sessionInstance.pushKeepAlive();
 
         logger.debug(`[kimi] Synced session config for keepalive: permissionMode=${currentPermissionMode}, model=${resolvedModel}`);
