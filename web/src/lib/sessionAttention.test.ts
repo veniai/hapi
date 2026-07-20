@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SessionSummary } from '@/types/api'
-import { classifySessionAttention, classifyAttentionKind, isAttentionLit } from './sessionAttention'
+import { classifySessionAttention, classifyAttentionKind, isAttentionLit, shouldMarkSessionEntry } from './sessionAttention'
 
 function makeSummary(overrides: Partial<SessionSummary> & { id: string }): SessionSummary {
     return {
@@ -171,5 +171,28 @@ describe('classifyAttentionKind (pure state)', () => {
     })
     it('returns unread by default', () => {
         expect(classifyAttentionKind(makeSummary({ id: 'a' }))).toBe('unread')
+    })
+})
+
+describe('shouldMarkSessionEntry', () => {
+    it('marks once per actual route entry, not on selected-session updates', () => {
+        expect(shouldMarkSessionEntry({
+            selectedSessionId: 'a', markedSessionId: null, sessionLoaded: true, tabVisible: true
+        })).toBe(true)
+        expect(shouldMarkSessionEntry({
+            selectedSessionId: 'a', markedSessionId: 'a', sessionLoaded: true, tabVisible: true
+        })).toBe(false)
+        expect(shouldMarkSessionEntry({
+            selectedSessionId: 'b', markedSessionId: 'a', sessionLoaded: true, tabVisible: true
+        })).toBe(true)
+    })
+
+    it('waits for session data and a visible tab', () => {
+        expect(shouldMarkSessionEntry({
+            selectedSessionId: 'a', markedSessionId: null, sessionLoaded: false, tabVisible: true
+        })).toBe(false)
+        expect(shouldMarkSessionEntry({
+            selectedSessionId: 'a', markedSessionId: null, sessionLoaded: true, tabVisible: false
+        })).toBe(false)
     })
 })
