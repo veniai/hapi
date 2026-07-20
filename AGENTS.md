@@ -184,7 +184,7 @@ Branches: `main` → tracks `upstream/main`; `deploy` → live, worktree `/home/
 - `socket/` - Socket.IO setup
 - `socket/handlers/cli/` - CLI event handlers (session, terminal, machine, RPC)
 - `sync/` - Core logic (sessionCache, messageService, rpcGateway)
-- `store/` - SQLite persistence (better-sqlite3)
+- `store/` - SQLite persistence (bun:sqlite)
 - `sse/` - Server-Sent Events manager
 - `telegram/` - Bot commands, callbacks
 - `notifications/` - Push (VAPID) and Telegram notifications
@@ -282,3 +282,4 @@ Rules:
 - Use the installed `cortex` skill for configuration reconciliation, Goal Contracts, or permission-boundary decisions.
 - Prefer declared project-native verification. Local side-effect-free checks may run directly in a trusted workspace.
 - A Goal cannot expand its own permission envelope. Stop and request a revised contract before new external or irreversible actions.
+- When a task has a human-frozen manifest under `.cortex/verify/<task>.manifest`, run `cortex verify <task>` before claiming it complete and attach the receipt as evidence. See references/verification.md for the flow (pure-code / MCP / human conditions).
