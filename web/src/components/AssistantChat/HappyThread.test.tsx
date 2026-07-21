@@ -89,27 +89,18 @@ describe('ConversationOutlinePanel', () => {
 })
 
 describe('scroll anchor helpers', () => {
-    it('restores latest only after entry selection and initial messages settle', () => {
+    it('restores latest only after initial messages settle', () => {
         expect(shouldRestoreInitialLatest({
-            ready: true,
             pending: true,
             messagesLoaded: true,
             messagesLoading: false
         })).toBe(true)
         expect(shouldRestoreInitialLatest({
-            ready: false,
-            pending: true,
-            messagesLoaded: true,
-            messagesLoading: false
-        })).toBe(false)
-        expect(shouldRestoreInitialLatest({
-            ready: true,
             pending: false,
             messagesLoaded: true,
             messagesLoading: false
         })).toBe(false)
         expect(shouldRestoreInitialLatest({
-            ready: true,
             pending: true,
             messagesLoaded: true,
             messagesLoading: true

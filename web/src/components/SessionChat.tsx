@@ -461,8 +461,6 @@ type SessionChatProps = {
     onSend: (text: string, attachments?: AttachmentMetadata[], scheduledAt?: number | null) => Promise<boolean>
     onFlushPending: () => Promise<void> | void
     onAtBottomChange: (atBottom: boolean) => void
-    /** Entry setup has completed for this session. */
-    initialPositionReady: boolean
     /** Located window has messages beyond it; surfacing a "load newer" affordance. */
     hasNewerMessages: boolean
     /** Page forward from a located window toward the latest messages. */
@@ -1365,7 +1363,6 @@ function SessionChatInner(props: SessionChatProps) {
                         onOutlineOpenChange={setOutlineOpen}
                         findLatestUserMessageId={findLatestUserMessageId}
                         sendScrollPreviousMessageId={sendScrollPreviousMessageId}
-                        initialPositionReady={props.initialPositionReady}
                         hasNewer={props.hasNewerMessages}
                         onFetchNewer={props.onFetchNewer}
                     />

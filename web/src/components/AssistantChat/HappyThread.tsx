@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 import { ThreadPrimitive } from '@assistant-ui/react'
+import { useRouter } from '@tanstack/react-router'
+import { getElementScrollRestorationEntry } from '@tanstack/router-core'
+import { getScrollRestorationKey } from '@/lib/scrollRestorationKey'
 import type { ApiClient } from '@/api/client'
 import type { SessionMetadataSummary } from '@/types/api'
 import type { ConversationOutlineItem } from '@/chat/outline'
@@ -116,13 +119,11 @@ export function findFirstMessageAfterViewport(viewport: HTMLElement): HTMLElemen
 }
 
 export function shouldRestoreInitialLatest(input: {
-    ready: boolean
     pending: boolean
     messagesLoaded: boolean
     messagesLoading: boolean
 }): boolean {
-    return input.ready
-        && input.pending
+    return input.pending
         && input.messagesLoaded
         && !input.messagesLoading
 }
@@ -326,9 +327,6 @@ export function HappyThread(props: {
     onOutlineItemClick?: (item: ConversationOutlineItem) => void
     findLatestUserMessageId: () => string | null
     sendScrollPreviousMessageId: string | null
-    /** Prevent initial restore until the router has completed entry setup for
-     *  this session. */
-    initialPositionReady: boolean
     /** Located window has messages beyond it — show a "load newer" affordance. */
     hasNewer: boolean
     /** Page forward from the located window toward the latest messages. */
@@ -336,6 +334,10 @@ export function HappyThread(props: {
 }) {
     const { t } = useTranslation()
     const { terminalToolDisplayMode } = useTerminalToolDisplayMode()
+    // 与 Router scrollRestoration 共用的稳定视口标识（见下方 data-scroll-restoration-id）：
+    // 保存/恢复都走这个 selector，不再靠脆弱的 nth-child 链。
+    const router = useRouter({ warn: false })
+    const scrollRestorationId = `chat-${props.sessionId}`
     const viewportRef = useRef<HTMLDivElement | null>(null)
     const contentRef = useRef<HTMLDivElement | null>(null)
     const newerSentinelRef = useRef<HTMLDivElement | null>(null)
@@ -511,21 +513,37 @@ export function HappyThread(props: {
     const restoreInitialLatestPosition = useCallback((): boolean => {
         const viewport = viewportRef.current
         if (!viewport || !shouldRestoreInitialLatest({
-            ready: props.initialPositionReady,
             pending: initialLatestPositionPendingRef.current,
             messagesLoaded: hasLoadedMessagesRef.current,
             messagesLoading: isLoadingMessagesRef.current
         })) {
             return false
         }
-        viewport.scrollTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight)
-        lastScrollTopRef.current = viewport.scrollTop
+        // Router 像素恢复优先：有本视口的缓存位置就回到离开时的位置；落底只是
+        // 首次访问/缓存缺失时的兜底。两者写同一数值、顺序无关——不能各写各的，
+        // 否则谁后跑谁赢，靠时序碰运气（先落底再往上弹的 bug）。
+        const saved = router
+            ? getElementScrollRestorationEntry(router, {
+                id: scrollRestorationId,
+                getKey: getScrollRestorationKey
+            })
+            : undefined
+        viewport.scrollTop = saved
+            ? Math.max(0, saved.scrollY)
+            : Math.max(0, viewport.scrollHeight - viewport.clientHeight)
         initialLatestPositionPendingRef.current = false
         positionSettledRef.current = true
-        setAutoScrollMode(true)
-        setAtBottomMode(true)
+        const intent = getScrollIntent({
+            scrollTop: viewport.scrollTop,
+            scrollHeight: viewport.scrollHeight,
+            clientHeight: viewport.clientHeight,
+            previousScrollTop: viewport.scrollTop
+        })
+        lastScrollTopRef.current = viewport.scrollTop
+        setAutoScrollMode(intent.isNearBottom)
+        setAtBottomMode(intent.isNearBottom)
         return true
-    }, [props.initialPositionReady, setAtBottomMode, setAutoScrollMode])
+    }, [router, scrollRestorationId, setAtBottomMode, setAutoScrollMode])
 
     const scrollToSentMessage = useCallback((): boolean => {
         const pending = pendingSendScrollRef.current
@@ -826,7 +844,7 @@ export function HappyThread(props: {
                     scrollToBottomOnRunStart={false}
                     scrollToBottomOnThreadSwitch={false}
                 >
-                    <div ref={viewportRef} className="app-scroll-y min-h-0 flex-1 overflow-x-hidden">
+                    <div ref={viewportRef} data-scroll-restoration-id={scrollRestorationId} className="app-scroll-y min-h-0 flex-1 overflow-x-hidden">
                         <div ref={contentRef} className="mx-auto w-full max-w-content min-w-0 p-3">
                             <div className="h-px w-full" aria-hidden="true" />
                             {showSkeleton ? (

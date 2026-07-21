@@ -683,13 +683,8 @@ function SessionPage() {
     } = useMessages(api, sessionId)
 
     // 回退到 spec 之前：进入 session 即落最新（useMessages 的 fetchLatest effect
-    // 负责）。阅读位置/locator entry target（saved/LWW/unread-start）整体退掉；
-    // 只标记 position-ready，让 HappyThread 走默认的「落底」。红点 G1 保留。
-    const [positionReadySessionId, setPositionReadySessionId] = useState<string | null>(null)
-    useEffect(() => {
-        if (!api || !sessionId) return
-        setPositionReadySessionId(sessionId)
-    }, [api, sessionId])
+    // 负责）。阅读位置恢复由 TanStack Router scrollRestoration 负责（落底只是
+    // 无缓存时的兜底，HappyThread 内让位 Router 缓存）。红点 G1 保留。
 
     // Tracks the most recent send the hub rejected (4xx/5xx/network), keyed
     // by the session the failed POST actually targeted (post-resolveSessionId).
@@ -992,7 +987,6 @@ function SessionPage() {
             onAtBottomChange={setAtBottom}
             onFetchNewer={fetchNewerMessages}
             hasNewerMessages={messagesHasNewer}
-            initialPositionReady={positionReadySessionId === sessionId}
             onRetryMessage={retryMessage}
             autocompleteSuggestions={getAutocompleteSuggestions}
             availableSlashCommands={slashCommands}
