@@ -10,6 +10,11 @@ vi.mock('./SessionExportDialog', () => ({ SessionExportDialog: () => null }))
 vi.mock('./RenameSessionDialog', () => ({ RenameSessionDialog: () => null }))
 vi.mock('./SessionActionMenu', () => ({ SessionActionMenu: () => null }))
 vi.mock('./ui/ConfirmDialog', () => ({ ConfirmDialog: () => null }))
+// 6483446（codex import）给 SessionHeader 加了 useToast 依赖；本测试只关心
+// reasoning 是否还在 header，mock 掉 toast 让 header 主体能独立渲染。
+vi.mock('@/lib/toast-context', () => ({
+    useToast: () => ({ addToast: () => {} }),
+}))
 
 import { SessionHeader } from './SessionHeader'
 import { I18nProvider } from '@/lib/i18n-context'
