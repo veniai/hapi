@@ -10,7 +10,6 @@ import {
     getRenderedMessageIds,
     getScrollIntent,
     locateOutlineTargetMessage,
-    resolveSavedScrollPosition,
     restoreScrollAnchor,
     shouldRestoreInitialLatest,
 } from '@/components/AssistantChat/HappyThread'
@@ -99,26 +98,26 @@ describe('scroll anchor helpers', () => {
         expect(shouldRestoreInitialLatest({
             ready: true,
             pending: true,
-            locatorActive: false,
-            hasSavedPosition: false,
             messagesLoaded: true,
             messagesLoading: false
         })).toBe(true)
         expect(shouldRestoreInitialLatest({
             ready: false,
             pending: true,
-            locatorActive: false,
-            hasSavedPosition: false,
+            messagesLoaded: true,
+            messagesLoading: false
+        })).toBe(false)
+        expect(shouldRestoreInitialLatest({
+            ready: true,
+            pending: false,
             messagesLoaded: true,
             messagesLoading: false
         })).toBe(false)
         expect(shouldRestoreInitialLatest({
             ready: true,
             pending: true,
-            locatorActive: true,
-            hasSavedPosition: false,
             messagesLoaded: true,
-            messagesLoading: false
+            messagesLoading: true
         })).toBe(false)
     })
     it('captures the first visible message relative to the viewport', () => {
@@ -373,19 +372,5 @@ describe('chat scroll persistence', () => {
         expect(gcChatScrollPositions(new Set(['keep']))).toBe(1)
         expect(readChatScrollPosition('keep')).toMatchObject({ scrollTop: 10, anchor: null })
         expect(readChatScrollPosition('remove')).toBeNull()
-    })
-
-    it('keeps the original target pending while async content is too short', () => {
-        expect(resolveSavedScrollPosition(2000, 200, false)).toEqual({
-            scrollTop: 200,
-            pendingScrollTop: 2000
-        })
-    })
-
-    it('releases the target only after the full saved position is reachable', () => {
-        expect(resolveSavedScrollPosition(2000, 2400, false)).toEqual({
-            scrollTop: 2000,
-            pendingScrollTop: null
-        })
     })
 })

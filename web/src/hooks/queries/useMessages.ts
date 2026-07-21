@@ -3,17 +3,14 @@ import type { ApiClient } from '@/api/client'
 import type { DecryptedMessage } from '@/types/api'
 import {
     fetchLatestMessages,
-    fetchLocatedWindow,
     fetchNewerMessages,
     fetchOlderMessages,
     flushPendingMessages,
     getMessageWindowState,
-    messageWindowContainsTarget,
     setAtBottom as setMessageWindowAtBottom,
     subscribeMessageWindow,
     type MessageWindowState,
 } from '@/lib/message-window-store'
-import { clearChatScrollPosition } from '@/lib/chat-scroll-store'
 
 export const EMPTY_STATE: MessageWindowState = {
     sessionId: 'unknown',
@@ -51,12 +48,6 @@ export function useMessages(api: ApiClient | null, sessionId: string | null): {
     hasNewer: boolean
     /** Page forward from a located window toward the latest messages. */
     fetchNewer: () => Promise<void>
-    /** Session-entry load. target != null → locate the window on that message
-     *  (saved/hub read position); target == null → load latest (bottom). On
-     *  locator not-found (target message gone) the saved anchor is cleared and
-     *  we fall back to latest. Driven by SessionPage, not an auto effect, so
-     *  the target can be picked from saved LWW hub read position. */
-    loadInitial: (targetMessageId: string | null) => Promise<boolean>
 } {
     const state = useSyncExternalStore(
         useCallback((listener) => {
@@ -74,32 +65,8 @@ export function useMessages(api: ApiClient | null, sessionId: string | null): {
         () => EMPTY_STATE
     )
 
-    // No auto-fetch effect here: SessionPage drives the initial load via
-    // loadInitial so it can locate the window on the saved/hub read position
-    // instead of always landing at the bottom.
-
-    const loadInitial = useCallback(async (targetMessageId: string | null) => {
-        if (!api || !sessionId) return false
-        if (targetMessageId) {
-            if (messageWindowContainsTarget(sessionId, targetMessageId)) {
-                return true
-            }
-            const result = await fetchLocatedWindow(api, sessionId, targetMessageId)
-            if (!result.ok) {
-                if (result.reason === 'not-found') {
-                    clearChatScrollPosition(sessionId)
-                }
-                await fetchLatestMessages(api, sessionId)
-            }
-            return result.ok
-        }
-        await fetchLatestMessages(api, sessionId)
-        return false
-    }, [api, sessionId])
-
-    // 回退到 spec 之前：进入 session 总 fetchLatest（落最新）。
-    // 阅读位置/locator 那套（saved/locator/unread-start entry target、reporter）
-    // 整体退掉——它造成了卡顿。红点 G1（attentionRev/handledRev）保留。
+    // 进入 session 总 fetchLatest（落最新）；阅读位置恢复由 TanStack Router
+    // scrollRestoration 负责（见 doc/spec/web-chat-read-position-cleanup.md）。
     useEffect(() => {
         if (!api || !sessionId) return
         void fetchLatestMessages(api, sessionId)
@@ -148,7 +115,6 @@ export function useMessages(api: ApiClient | null, sessionId: string | null): {
         refetch,
         flushPending,
         setAtBottom,
-        loadInitial,
         hasNewer: state.hasNewer,
         fetchNewer,
     }

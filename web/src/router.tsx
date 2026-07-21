@@ -40,7 +40,6 @@ import { queryKeys } from '@/lib/query-keys'
 import { useToast } from '@/lib/toast-context'
 import { useTranslation } from '@/lib/use-translation'
 import { fetchLatestMessages, gcMessageWindows, seedMessageWindowFromSession } from '@/lib/message-window-store'
-import { gcChatScrollPositions } from '@/lib/chat-scroll-store'
 import { clearDraftsAfterSend } from '@/lib/clearDraftsAfterSend'
 import { inactiveSessionCanResume } from '@/lib/sessionResume'
 import { markSessionSeen } from '@/lib/sessionLastSeen'
@@ -184,7 +183,6 @@ function SessionsPage() {
         if (!sessionsLoaded) return
         const validSessionIds = new Set(sessions.map((session) => session.id))
         gcMessageWindows(validSessionIds)
-        gcChatScrollPositions(validSessionIds)
     }, [sessions, sessionsLoaded])
     const { machines } = useMachines(api, true)
     const [isSyncingCodexSession, setIsSyncingCodexSession] = useState(false)
@@ -994,7 +992,6 @@ function SessionPage() {
             onAtBottomChange={setAtBottom}
             onFetchNewer={fetchNewerMessages}
             hasNewerMessages={messagesHasNewer}
-            locatorTargetMessageId={null}
             initialPositionReady={positionReadySessionId === sessionId}
             onRetryMessage={retryMessage}
             autocompleteSuggestions={getAutocompleteSuggestions}
