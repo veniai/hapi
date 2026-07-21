@@ -1270,6 +1270,8 @@ export function HappyComposer(props: {
                             contextEstimated={contextEstimated}
                             model={model}
                             modelReasoningEffort={modelReasoningEffort}
+                            effort={effort}
+                            grokReasoningOptions={agentFlavor === 'grok' ? availableEffortOptions : undefined}
                             serviceTier={serviceTier}
                             permissionMode={permissionMode}
                             collaborationMode={collaborationMode}

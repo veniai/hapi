@@ -10,7 +10,7 @@ import type { AgentState, CodexCollaborationMode, PermissionMode } from '@/types
 import type { ConversationStatus } from '@/realtime/types'
 import type { ThreadGoal } from '@/types/api'
 import { getContextBudgetTokens } from '@/chat/modelConfig'
-import { formatCodexReasoningLabel, shouldShowCodexReasoningLabel } from '@/lib/codexStatusLabels'
+import { formatReasoningStatusLabel, type ReasoningGrokOption } from '@/lib/reasoningStatusLabels'
 import { isFastServiceTier } from './codexFastMode'
 import { useTranslation } from '@/lib/use-translation'
 
@@ -151,6 +151,8 @@ export function StatusBar(props: {
     contextEstimated?: boolean
     model?: string | null
     modelReasoningEffort?: string | null
+    effort?: string | null
+    grokReasoningOptions?: ReadonlyArray<ReasoningGrokOption> | null
     serviceTier?: string | null
     permissionMode?: PermissionMode
     collaborationMode?: CodexCollaborationMode
@@ -210,9 +212,12 @@ export function StatusBar(props: {
     const collaborationModeLabel = displayCollaborationMode
         ? getCodexCollaborationModeLabel(displayCollaborationMode)
         : null
-    const codexReasoningLabel = shouldShowCodexReasoningLabel(props.agentFlavor)
-        ? formatCodexReasoningLabel(props.modelReasoningEffort)
-        : null
+    const reasoningLabel = formatReasoningStatusLabel({
+        flavor: props.agentFlavor,
+        modelReasoningEffort: props.modelReasoningEffort,
+        effort: props.effort,
+        grokOptions: props.grokReasoningOptions
+    })
     // Prefer the explicit service tier (the real Fast-mode toggle) when set;
     // fall back to the effort/model heuristic only when the tier is unknown.
     const codexFastMode = props.agentFlavor === 'codex'
@@ -255,9 +260,9 @@ export function StatusBar(props: {
             </div>
 
             <div className="flex min-w-0 shrink-0 items-center gap-2">
-                {codexReasoningLabel ? (
-                    <span className="whitespace-nowrap text-xs text-[var(--app-hint)]">
-                        {codexReasoningLabel}
+                {reasoningLabel ? (
+                    <span data-testid="status-bar-reasoning" className="whitespace-nowrap text-xs text-[var(--app-hint)]">
+                        {reasoningLabel}
                     </span>
                 ) : null}
                 {codexFastMode ? (
