@@ -9,6 +9,7 @@ import { extractTodoWriteTodosFromMessageContent } from '../../../sync/todos'
 import { extractTeamStateFromMessageContent, applyTeamStateDelta } from '../../../sync/teams'
 import { extractBackgroundTaskDelta } from '../../../sync/backgroundTasks'
 import { shouldRecordSessionActivity, isAgentResultContent, getPendingRequestIds } from '../../../sync/sessionActivity'
+import { classifySyntheticQuotaError } from '../../../sync/autoResume'
 import type { CliSocketWithData } from '../../socketTypes'
 import type { SessionEndReason } from '@hapi/protocol'
 import type { AccessErrorReason, AccessResult } from './types'
@@ -81,10 +82,13 @@ export type SessionHandlersDeps = {
     /** Drops the queued-thinking grace so synchronous CLI handlers (e.g. slash
      *  commands) don't leave the spinner stuck for the full grace window. */
     onMessagesConsumed?: (sessionId: string) => void
+    /** Auto-resume: a synthetic GLM quota error was just persisted for this
+     *  session. Caller schedules a recovery prompt at the reset time (spec §6). */
+    onAutoResumeSchedule?: (sessionId: string, resetsAtMs: number, code: string) => void
 }
 
 export function registerSessionHandlers(socket: CliSocketWithData, deps: SessionHandlersDeps): void {
-    const { store, resolveSessionAccess, emitAccessError, onSessionAlive, onSessionReady, onSessionEnd, onWebappEvent, onBackgroundTaskDelta, onSessionActivity, onAttentionBump, onSweepImmediateQueued, onMessagesConsumed } = deps
+    const { store, resolveSessionAccess, emitAccessError, onSessionAlive, onSessionReady, onSessionEnd, onWebappEvent, onBackgroundTaskDelta, onSessionActivity, onAttentionBump, onSweepImmediateQueued, onMessagesConsumed, onAutoResumeSchedule } = deps
 
     socket.on('message', (data: unknown) => {
         const parsed = messageSchema.safeParse(data)
@@ -117,6 +121,12 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
         }
 
         const msg = store.messages.addMessage(sid, content, localId)
+        try {
+            const quota = classifySyntheticQuotaError(content)
+            if (quota) onAutoResumeSchedule?.(sid, quota.resetsAtMs, quota.code)
+        } catch (e) {
+            console.warn(`[auto-resume] classify failed for ${sid}: ${e instanceof Error ? e.message : String(e)}`)
+        }
         if (shouldRecordSessionActivity(content)) {
             onSessionActivity?.(sid, msg.createdAt)
         }

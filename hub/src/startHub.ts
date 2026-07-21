@@ -1,6 +1,7 @@
 import { createConfiguration, type ConfigSource } from './configuration'
 import { Store } from './store'
 import { SyncEngine, type SyncEvent } from './sync/syncEngine'
+import { QUOTA_RESUME_PROMPT } from './sync/autoResume'
 import { NotificationHub } from './notifications/notificationHub'
 import type { NotificationChannel } from './notifications/notificationTypes'
 import { HappyBot } from './telegram/bot'
@@ -193,7 +194,17 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         onSessionActivity: (sessionId, updatedAt) => syncEngine?.recordSessionActivity(sessionId, updatedAt),
         onAttentionBump: (sessionId) => syncEngine?.bumpAttention(sessionId),
         onSweepImmediateQueued: (sessionId, now) => syncEngine?.sweepImmediateQueuedOnSessionEnd(sessionId, now),
-        onMessagesConsumed: (sessionId) => syncEngine?.clearQueuedThinkingGrace(sessionId)
+        onMessagesConsumed: (sessionId) => syncEngine?.clearQueuedThinkingGrace(sessionId),
+        onAutoResumeSchedule: (sid, resetsAtMs) => {
+            // scheduledAt in the past → sendMessage sends immediately (SDK already
+            // spun past the reset point); in the future → 5s tick releases it.
+            void syncEngine?.sendMessage(sid, {
+                text: QUOTA_RESUME_PROMPT,
+                scheduledAt: resetsAtMs,
+                localId: `auto-resume-${sid}-${resetsAtMs}`,
+                sentFrom: 'system',
+            }).catch((e) => console.warn(`[auto-resume] schedule failed for ${sid}: ${e instanceof Error ? e.message : String(e)}`))
+        }
     })
 
     syncEngine = new SyncEngine(store, socketServer.io, socketServer.rpcRegistry, sseManager)

@@ -483,7 +483,7 @@ export class MessageService {
             text: string
             localId?: string | null
             attachments?: AttachmentMetadata[]
-            sentFrom?: 'telegram-bot' | 'webapp'
+            sentFrom?: 'telegram-bot' | 'webapp' | 'system'
             scheduledAt?: number | null
         }
     ): Promise<{ scheduledForFuture: boolean }> {
