@@ -13,7 +13,6 @@ import { Spinner } from '@/components/Spinner'
 import { useTerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
 import { useTranslation } from '@/lib/use-translation'
 import { CloseIcon } from '@/components/icons'
-import { writeChatScrollPosition } from '@/lib/chat-scroll-store'
 
 type ScrollAnchor = {
     id: string
@@ -31,7 +30,6 @@ const MESSAGE_ANCHOR_SELECTOR = '.happy-thread-messages > [id]'
 const AUTO_SCROLL_RESUME_THRESHOLD_PX = 120
 const MANUAL_SCROLL_EPSILON_PX = 1
 const SEND_SCROLL_TIMEOUT_MS = 1500
-const SCROLL_PERSIST_DELAY_MS = 150
 const NEWER_PREFETCH_MARGIN_PX = 600
 
 type ScrollIntent = {
@@ -367,7 +365,6 @@ export function HappyThread(props: {
     const pendingNewerAnchorRef = useRef<ScrollAnchor | null>(null)
     const newerLoadInFlightRef = useRef(false)
     const newerPrefetchArmedRef = useRef(true)
-    const persistTimerRef = useRef<number | null>(null)
     const pendingCountRef = useRef(props.pendingCount)
     const findLatestUserMessageIdRef = useRef(props.findLatestUserMessageId)
     pendingCountRef.current = props.pendingCount
@@ -449,26 +446,6 @@ export function HappyThread(props: {
         setAtBottomMode(intent.isNearBottom)
     }, [setAutoScrollMode, setAtBottomMode])
 
-    const persistViewportPosition = useCallback((viewport: HTMLElement) => {
-        writeChatScrollPosition(props.sessionId, {
-            scrollTop: viewport.scrollTop,
-            anchor: captureScrollAnchor(viewport)
-        })
-    }, [props.sessionId])
-
-    const scheduleViewportPositionPersist = useCallback((viewport: HTMLElement) => {
-        if (!positionSettledRef.current) return
-        if (persistTimerRef.current !== null) {
-            window.clearTimeout(persistTimerRef.current)
-        }
-        persistTimerRef.current = window.setTimeout(() => {
-            persistTimerRef.current = null
-            if (positionSettledRef.current) {
-                persistViewportPosition(viewport)
-            }
-        }, SCROLL_PERSIST_DELAY_MS)
-    }, [persistViewportPosition])
-
     // Track scroll position to toggle autoScroll (stable listener using refs)
     useEffect(() => {
         const viewport = viewportRef.current
@@ -484,10 +461,9 @@ export function HappyThread(props: {
                 previousScrollTop: lastScrollTopRef.current
             })
             lastScrollTopRef.current = viewport.scrollTop
-            // user-driven scroll — position is settled; persist it
+            // user-driven scroll — position is settled
             positionSettledRef.current = true
             initialLatestPositionPendingRef.current = false
-            scheduleViewportPositionPersist(viewport)
 
             if (intent.isScrollingUp && intent.distanceFromBottom > MANUAL_SCROLL_EPSILON_PX) {
                 setAutoScrollMode(false)
@@ -519,22 +495,13 @@ export function HappyThread(props: {
         viewport.addEventListener('touchstart', settleOnUserGesture, { passive: true })
         viewport.addEventListener('pointerdown', settleOnUserGesture, { passive: true })
         return () => {
-            if (persistTimerRef.current !== null) {
-                window.clearTimeout(persistTimerRef.current)
-                persistTimerRef.current = null
-            }
-            if (positionSettledRef.current) {
-                persistViewportPosition(viewport)
-            }
             viewport.removeEventListener('scroll', handleScroll)
             viewport.removeEventListener('wheel', settleOnUserGesture)
             viewport.removeEventListener('touchstart', settleOnUserGesture)
             viewport.removeEventListener('pointerdown', settleOnUserGesture)
         }
     }, [
-        persistViewportPosition,
         props.sessionId,
-        scheduleViewportPositionPersist,
         setAtBottomMode,
         setAutoScrollMode
     ])

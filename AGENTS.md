@@ -31,7 +31,7 @@ This file is the editable source for the generated project `AGENTS.md`. Edit thi
 - **Allowed without additional approval:** local code edits on feature branches off `main`; side-effect-free local checks (typecheck, tests, lint) in a trusted workspace.
 - **Requires approval:** anything reaching **live** **unless covered by the standing authorization below**. Live = systemd user services (`hapi-hub`, `hapi-web`, `hapi-runner`) running the `deploy` branch from worktree `/home/claw/deploy/hapi`; public via Cloudflare at `hapi.zhetengde.xyz`.
 - **Change → live flow:**
-  1. Branch off `main` (`feature/<name>`); develop + verify `bun typecheck && bun run test`.
+  1. Branch off `main` (`feature/<name>`); develop + verify `bun typecheck && bun run test && bun run build:web`.
   2. Push feature branch + open PR → `main`. CI gate (`.github/workflows/test.yml`: typecheck + test + build:web) must pass; **branch protection** requires the `test` check + linear history (merge rebase, no merge commit). Delete branch after merge.
   3. After merge, move to deploy: `cd /home/claw/deploy/hapi && git merge --ff-only main`. `--ff-only` keeps deploy a clean mirror of `main` — refuses on divergence (fix on a new PR first), never produces merge commits.
   4. Apply by scope: web → `bun run build:web` then restart `hapi-web`; hub → restart `hapi-hub`; cli → restart `hapi-runner`; shared → restart all three. (hub/cli run source — no build.)
@@ -159,7 +159,7 @@ Branches: `main` → tracks `upstream/main`, PR target, **branch-protected** (re
 
 ### Change → live
 
-1. Branch off `main` (`feature/<name>`); develop + verify `bun typecheck && bun run test`.
+1. Branch off `main` (`feature/<name>`); develop + verify `bun typecheck && bun run test && bun run build:web`.
 2. Push feature branch + open PR → `main`. CI (`.github/workflows/test.yml`: typecheck + test + build:web) must pass; branch protection requires the `test` check + linear history (merge rebase, never a merge commit). Delete branch after merge.
 3. Move to deploy: `cd /home/claw/deploy/hapi && git merge --ff-only main`. `--ff-only` keeps deploy a clean mirror of `main` — refuses if deploy has diverged (fix on a new PR first), never produces merge commits. Never commit directly on `deploy`.
 4. Apply by scope: web → `bun run build:web` then restart `hapi-web`; hub → restart `hapi-hub`; cli → restart `hapi-runner`; shared → restart all three. (hub/cli run source — no build needed.)

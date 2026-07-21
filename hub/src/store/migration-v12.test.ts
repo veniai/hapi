@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'bun:test'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { Store } from './index'
 
 describe('migration v11 → v12 (attention_rev + handled_rev)', () => {
@@ -13,24 +16,43 @@ describe('migration v11 → v12 (attention_rev + handled_rev)', () => {
         store.close()
     })
 
-    it('V11 → V12 adds NOT NULL DEFAULT 0 columns', () => {
-        const db = new Store(':memory:')
-        // Force V11 schema (last_read columns present from V11, no rev columns),
-        // then reopen so the step ladder runs migrateFromV11ToV12.
-        db['db'].exec('PRAGMA user_version = 11')
-        db.close()
+    it('V11 → V12 adds NOT NULL DEFAULT 0 columns (real upgrade path, file DB)', () => {
+        const dir = mkdtempSync(join(tmpdir(), 'hapi-migration-v12-'))
+        const dbPath = join(dir, 'test.db')
+        let store: Store | undefined
+        try {
+            // Build a real V11-shaped DB on disk: fresh V13 schema, strip the rev
+            // columns (V11 has none), add last_read (V11 still has them), set uv=11.
+            // :memory: can't be used — close+reopen on :memory: yields a fresh DB
+            // (createSchema), not the migration ladder, so the upgrade path would
+            // never actually run.
+            store = new Store(dbPath)
+            store['db'].exec('ALTER TABLE sessions DROP COLUMN attention_rev')
+            store['db'].exec('ALTER TABLE sessions DROP COLUMN handled_rev')
+            store['db'].exec('ALTER TABLE sessions ADD COLUMN last_read_message_id TEXT')
+            store['db'].exec('ALTER TABLE sessions ADD COLUMN last_read_at INTEGER')
+            store['db'].exec('PRAGMA user_version = 11')
+            store.close()
 
-        const store2 = new Store(':memory:')
-        const cols = store2['db'].prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string; dflt_value: string | null; notnull: number }>
-        const att = cols.find((c) => c.name === 'attention_rev')
-        const hnd = cols.find((c) => c.name === 'handled_rev')
-        expect(att).toBeDefined()
-        expect(hnd).toBeDefined()
-        expect(att!.dflt_value).toBe('0')
-        expect(hnd!.dflt_value).toBe('0')
-        expect(att!.notnull).toBe(1)
-        expect(hnd!.notnull).toBe(1)
-        store2.close()
+            // Reopen → initSchema runs the ladder from V11:
+            // migrateFromV11ToV12 ADDs attention_rev/handled_rev (NOT NULL DEFAULT 0),
+            // then migrateFromV12ToV13 DROPs last_read. Verifies the ADD path.
+            store = new Store(dbPath)
+            const cols = store['db'].prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string; dflt_value: string | null; notnull: number }>
+            const att = cols.find((c) => c.name === 'attention_rev')
+            const hnd = cols.find((c) => c.name === 'handled_rev')
+            expect(att).toBeDefined()
+            expect(hnd).toBeDefined()
+            expect(att!.dflt_value).toBe('0')
+            expect(hnd!.dflt_value).toBe('0')
+            expect(att!.notnull).toBe(1)
+            expect(hnd!.notnull).toBe(1)
+            const uv = (store['db'].prepare('PRAGMA user_version').get() as { user_version: number }).user_version
+            expect(uv).toBe(13)
+        } finally {
+            store?.close()
+            rmSync(dir, { recursive: true, force: true })
+        }
     })
 
     it('bumpAttentionRev increments monotonically and returns null for missing session', () => {
