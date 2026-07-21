@@ -1,4 +1,4 @@
-<!-- cortex-managed:project:0.1.0 -->
+<!-- cortex-managed:project:0.2.0 -->
 <!-- Edit .cortex/project.md, then run cortex init. -->
 
 # Cortex Project Source
