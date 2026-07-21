@@ -9,7 +9,7 @@ import { extractTodoWriteTodosFromMessageContent } from '../../../sync/todos'
 import { extractTeamStateFromMessageContent, applyTeamStateDelta } from '../../../sync/teams'
 import { extractBackgroundTaskDelta } from '../../../sync/backgroundTasks'
 import { shouldRecordSessionActivity, isAgentResultContent, getPendingRequestIds } from '../../../sync/sessionActivity'
-import { classifySyntheticQuotaError } from '../../../sync/autoResume'
+import { classifySyntheticError, type SyntheticError } from '../../../sync/autoResume'
 import type { CliSocketWithData } from '../../socketTypes'
 import type { SessionEndReason } from '@hapi/protocol'
 import type { AccessErrorReason, AccessResult } from './types'
@@ -84,7 +84,7 @@ export type SessionHandlersDeps = {
     onMessagesConsumed?: (sessionId: string) => void
     /** Auto-resume: a synthetic GLM quota error was just persisted for this
      *  session. Caller schedules a recovery prompt at the reset time (spec §6). */
-    onAutoResumeSchedule?: (sessionId: string, resetsAtMs: number, code: string) => void
+    onAutoResumeSchedule?: (sessionId: string, error: SyntheticError) => void
 }
 
 export function registerSessionHandlers(socket: CliSocketWithData, deps: SessionHandlersDeps): void {
@@ -122,8 +122,8 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
 
         const msg = store.messages.addMessage(sid, content, localId)
         try {
-            const quota = classifySyntheticQuotaError(content)
-            if (quota) onAutoResumeSchedule?.(sid, quota.resetsAtMs, quota.code)
+            const error = classifySyntheticError(content)
+            if (error) onAutoResumeSchedule?.(sid, error)
         } catch (e) {
             console.warn(`[auto-resume] classify failed for ${sid}: ${e instanceof Error ? e.message : String(e)}`)
         }

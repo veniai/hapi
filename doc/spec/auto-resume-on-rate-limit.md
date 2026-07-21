@@ -12,7 +12,7 @@
 - **信号在哪（实测铁证）**：错误以 **`model:"<synthetic>"` 的 assistant 消息**进 hub 并落库——**不是** `result` 消息（converter 对 `result` 返回 null，result 不落库，见 §2.1）。text block 即 `API Error: Request rejected (429) · [1308]…将在 <时间> 重置…`。**sentinel `model:"<synthetic>"`** 把 harness 注入的错误与 agent 手打讨论（`model:"glm-5.2"`）死死分开。
 - **检测（hub，机械，零 LLM）**：`sessionHandlers.ts` 收消息入库后，对 `model:"<synthetic>" && role:"assistant"` 的消息跑一条 regex 取 `[code] + 重置时间`。
 - **动作（复用定时发送）**：`syncEngine.sendMessage(sid, {text: 恢复提示, scheduledAt: 重置时间, localId, sentFrom:'system'})`（配置点 `startHub.ts:177`）→ 存一条 `scheduled_at` 未来的消息行 → 现成 5s tick `releaseMatureScheduledMessages` 到点 emit `new-message` → runner 喂 agent → 下 turn 消费。`localId` 必填（`addMessage` guard `messages.ts:51`）。
-- **只做 quota `[1308]`**：transient `[1302]` 砍——Claude SDK 内部已 `max_retries:10` 指数退避，瞬时 429 基本被它吃掉。
+- **两种终态错误都续**：quota `[1308]`（有 reset 时间，排到重置点）+ rate `[1302]`（无 reset，退避重试，§6.5）。`[1302]` 原砍（赌 SDK 10x retry 吃掉），实测 SDK 撑 ~3min（退避 3s→38s）仍耗尽 → 终态落库 → 现补退避兜底（治本无解：限流可持续 ~16min >> SDK retry 总时长）。
 - **范围**：新增 `hub/src/sync/autoResume.ts`（纯函数 + prompt 常量）+ 测试；改 `sessionHandlers.ts`（hook+try/catch + dep 回调）+ `server.ts`（透传）+ `startHub.ts:177`（配置点 → `syncEngine.sendMessage`）+ `{syncEngine,messageService}.ts`（`sentFrom` 联合加 `'system'`）。**不碰 cli、不改 DB schema（`scheduled_at` 早在）、不动 shared 类型、不碰 web 渲染、不碰 Cursor/Codex**。
 
 ---
@@ -217,6 +217,28 @@ onAutoResumeSchedule: (sid, resetsAtMs, _code) => {
 - **续上的 turn 又撞 `[1308]`**（reset 时间被推后）：新 `<synthetic>` 消息入库 → 再排程到新 reset 时间——符合预期（按新时间重排），自然收敛。reschedule cap 见 §11（MVP 不加）。
 - **限额期内用户手动发消息**：用户消息是独立行，与 scheduled 恢复行并存；到点的恢复行照常 emit。若用户不想自动续，可经 web `DELETE /sessions/:id/messages/:messageId`（现成）取消那条 scheduled 恢复行——无需特殊接线。
 
+### 6.5 `[1302]` rate-limit auto-resume（退避 + 去重 + cap）
+
+**触发**：`<synthetic>` + `[1302]` + "速率限制/控制请求频率"（**无 reset 时间**）。实测落库（live DB 多 session），SDK 10x retry 撑 ~3min（退避 3s→38s）耗尽 → 终态 → 会话 idle。限流可持续 ~16min（实测）>> SDK 撑的总时长 → **治本无解**（调 `maxRetries` 收益限、代价大），退避兜底。
+
+**和 `[1308]` 区别**：无 reset 时间 → 不能排到确定时刻，用**退避重试**（`now + backoff`）。
+
+**classify 扩展**：`classifySyntheticError` 返回 `{kind:'quota',code,resetsAtMs} | {kind:'rate',code} | null`。rate regex `/\[(\d+)\][^\]]*?(?:速率限制|控制请求频率)/`（首个 `[纯数字]` + 速率关键词，无时间）。
+
+**退避（`computeRateBackoff` 纯函数，DB 推断档位，无新状态）**：tier = 该 session 最近 30min 的 rate 恢复行数（localId 前缀 `auto-resume-rate-`，`store.messages` 加 `countRecentByLocalIdPrefix(sid, prefix, sinceMs)`）；`delay = 60s × 2^tier`（60/120/240/480/960s）；**cap**：tier ≥ 5 → null（**静默停**，不叫人，会话 idle 等人手）。
+
+**去重（防密集风暴）**：限流密集时 ~80s 落一条 `[1302]`。localId `auto-resume-rate-<sid>-<window>`（window = `floor(now/60s)`），addMessage 幂等 → **同 60s 窗口只排一条**。
+
+**配置点（startHub）**：`onAutoResumeSchedule(sid, error)` switch `error.kind`：quota → §6.3（`scheduledAt: resetsAtMs`）；rate → `computeRateBackoff(sid, store)`，null（cap）不排，否则 `sendMessage({scheduledAt: now+delay, localId: auto-resume-rate-<sid>-<window>, sentFrom:'system'})`。
+
+**RATE_RESUME_PROMPT**：同 QUOTA_RESUME_PROMPT 结构，标"（系统自动恢复：API 速率限制，已退避等待）"。
+
+**回调签名变**：`onAutoResumeSchedule(sid, resetsAtMs, code)` → `(sid, error: SyntheticError)`；透传链三层 deps（server/index/sessionHandlers）字段类型同步。
+
+**和 quota 协调**：同 session 可能两者都有，各自排（localId 前缀区分）；rate 档位计数只算 rate 行。
+
+**局限**：续上又撞 → 循环（每次消耗一 turn），cap 5 档防护；CD 60s < 密集窗口 80s，靠去重兜。
+
 ---
 
 ## 7. 改动清单
@@ -257,7 +279,7 @@ onAutoResumeSchedule: (sid, resetsAtMs, _code) => {
 
 - 真 `<synthetic>` 1308 样本（§5 原文）→ `{code:'1308', resetsAtMs}`。
 - **agent 手打讨论 1308**（`model:"glm-5.2"`, role:assistant, text 含 `[1308]…重置`）→ `null`（sentinel 门控）。
-- transient 文本（`[1302]请您控制请求频率`，无 reset 时间，`<synthetic>`）→ `null`。
+- transient 文本（`[1302]请您控制请求频率`，无 reset 时间，`<synthetic>`）→ `{kind:'rate', code:'1302'}`（§6.5 rate 分支，非 null）。
 - `tool_result` 形（role:user, model:undefined）→ `null`。
 - 非 output 信封 / 缺 data.message → `null`。
 - 无 text block 的 `<synthetic>` → `null`。

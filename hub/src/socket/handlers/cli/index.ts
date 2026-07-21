@@ -2,6 +2,7 @@ import type { CodexCollaborationMode, PermissionMode } from '@hapi/protocol/type
 import type { Store, StoredMachine, StoredSession } from '../../../store'
 import type { RpcRegistry } from '../../rpcRegistry'
 import type { SyncEvent } from '../../../sync/syncEngine'
+import type { SyntheticError } from '../../../sync/autoResume'
 import type { TerminalRegistry } from '../../terminalRegistry'
 import type { CliSocketWithData, SocketServer } from '../../socketTypes'
 import type { AccessErrorReason, AccessResult } from './types'
@@ -52,7 +53,7 @@ export type CliHandlersDeps = {
     onAttentionBump?: (sessionId: string) => void
     onSweepImmediateQueued?: (sessionId: string, now: number) => void
     onMessagesConsumed?: (sessionId: string) => void
-    onAutoResumeSchedule?: (sessionId: string, resetsAtMs: number, code: string) => void
+    onAutoResumeSchedule?: (sessionId: string, error: SyntheticError) => void
 }
 
 export function registerCliHandlers(socket: CliSocketWithData, deps: CliHandlersDeps): void {

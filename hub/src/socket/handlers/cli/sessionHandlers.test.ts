@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { Store, type StoredSession } from '../../../store'
 import type { SyncEvent } from '../../../sync/syncEngine'
+import type { SyntheticError } from '../../../sync/autoResume'
 import type { CliSocketWithData } from '../../socketTypes'
 import { registerSessionHandlers } from './sessionHandlers'
 
@@ -57,9 +58,11 @@ describe('auto-resume hook (onAutoResumeSchedule)', () => {
 
     const QUOTA_TEXT =
         'API Error: Request rejected (429) · [1308][已达到 5 小时的使用上限。您的限额将在 2026-07-17 16:01:19 重置。]'
+    const RATE_TEXT =
+        'API Error: Request rejected (429) · [1302][您的账户已达到速率限制，请您控制请求频率][20260721224854f77f3391b1f94b3a]'
 
-    it('invokes onAutoResumeSchedule with sid + code + reset time for a synthetic quota error', () => {
-        const calls: Array<{ sid: string; resetsAtMs: number; code: string }> = []
+    it('invokes onAutoResumeSchedule with kind=quota for a [1308] synthetic error', () => {
+        const calls: Array<{ sid: string; error: SyntheticError }> = []
         const store = new Store(':memory:')
         const session = store.sessions.getOrCreateSession('auto-resume-quota', {}, null, 'default')
         const socket = new FakeSocket()
@@ -69,21 +72,40 @@ describe('auto-resume hook (onAutoResumeSchedule)', () => {
             emitAccessError: () => {
                 throw new Error('unexpected access error')
             },
-            onAutoResumeSchedule: (sid, resetsAtMs, code) => calls.push({ sid, resetsAtMs, code })
+            onAutoResumeSchedule: (sid, error) => calls.push({ sid, error })
         })
 
         socket.trigger('message', { sid: session.id, message: syntheticContent(QUOTA_TEXT) })
 
         expect(calls).toHaveLength(1)
         expect(calls[0].sid).toBe(session.id)
-        expect(calls[0].code).toBe('1308')
-        expect(new Date(calls[0].resetsAtMs).getHours()).toBe(16)
+        expect(calls[0].error).toMatchObject({ kind: 'quota', code: '1308' })
         // The synthetic message itself is still persisted (hook does not block ingress).
         expect(store.messages.getMessages(session.id)).toHaveLength(1)
     })
 
+    it('invokes onAutoResumeSchedule with kind=rate for a [1302] synthetic error', () => {
+        const calls: Array<{ sid: string; error: SyntheticError }> = []
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('auto-resume-rate', {}, null, 'default')
+        const socket = new FakeSocket()
+        registerSessionHandlers(socket as unknown as CliSocketWithData, {
+            store,
+            resolveSessionAccess: () => ({ ok: true, value: session as StoredSession }),
+            emitAccessError: () => {
+                throw new Error('unexpected access error')
+            },
+            onAutoResumeSchedule: (sid, error) => calls.push({ sid, error })
+        })
+
+        socket.trigger('message', { sid: session.id, message: syntheticContent(RATE_TEXT) })
+
+        expect(calls).toHaveLength(1)
+        expect(calls[0].error).toEqual({ kind: 'rate', code: '1302' })
+    })
+
     it('does NOT invoke onAutoResumeSchedule for agent-authored discussion (real model name)', () => {
-        const calls: Array<{ sid: string; resetsAtMs: number; code: string }> = []
+        const calls: Array<{ sid: string; error: SyntheticError }> = []
         const store = new Store(':memory:')
         const session = store.sessions.getOrCreateSession('auto-resume-negative', {}, null, 'default')
         const socket = new FakeSocket()
@@ -93,32 +115,13 @@ describe('auto-resume hook (onAutoResumeSchedule)', () => {
             emitAccessError: () => {
                 throw new Error('unexpected access error')
             },
-            onAutoResumeSchedule: (sid, resetsAtMs, code) => calls.push({ sid, resetsAtMs, code })
+            onAutoResumeSchedule: (sid, error) => calls.push({ sid, error })
         })
 
         socket.trigger('message', { sid: session.id, message: syntheticContent(QUOTA_TEXT, 'glm-5.2') })
 
         expect(calls).toHaveLength(0)
         expect(store.messages.getMessages(session.id)).toHaveLength(1)
-    })
-
-    it('does NOT invoke onAutoResumeSchedule for transient errors without a reset time', () => {
-        const calls: Array<{ sid: string; resetsAtMs: number; code: string }> = []
-        const store = new Store(':memory:')
-        const session = store.sessions.getOrCreateSession('auto-resume-transient', {}, null, 'default')
-        const socket = new FakeSocket()
-        registerSessionHandlers(socket as unknown as CliSocketWithData, {
-            store,
-            resolveSessionAccess: () => ({ ok: true, value: session as StoredSession }),
-            emitAccessError: () => {
-                throw new Error('unexpected access error')
-            },
-            onAutoResumeSchedule: (sid, resetsAtMs, code) => calls.push({ sid, resetsAtMs, code })
-        })
-
-        socket.trigger('message', { sid: session.id, message: syntheticContent('[1302]请您控制请求频率') })
-
-        expect(calls).toHaveLength(0)
     })
 
     it('never throws on malformed content (hook is isolated from main persistence)', () => {

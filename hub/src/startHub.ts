@@ -1,7 +1,7 @@
 import { createConfiguration, type ConfigSource } from './configuration'
 import { Store } from './store'
 import { SyncEngine, type SyncEvent } from './sync/syncEngine'
-import { QUOTA_RESUME_PROMPT } from './sync/autoResume'
+import { QUOTA_RESUME_PROMPT, RATE_RESUME_PROMPT, computeRateBackoff, rateWindow, RATE_AUTO_RESUME_PREFIX, RATE_TIER_WINDOW_MS } from './sync/autoResume'
 import { NotificationHub } from './notifications/notificationHub'
 import type { NotificationChannel } from './notifications/notificationTypes'
 import { HappyBot } from './telegram/bot'
@@ -195,15 +195,32 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         onAttentionBump: (sessionId) => syncEngine?.bumpAttention(sessionId),
         onSweepImmediateQueued: (sessionId, now) => syncEngine?.sweepImmediateQueuedOnSessionEnd(sessionId, now),
         onMessagesConsumed: (sessionId) => syncEngine?.clearQueuedThinkingGrace(sessionId),
-        onAutoResumeSchedule: (sid, resetsAtMs) => {
-            // scheduledAt in the past → sendMessage sends immediately (SDK already
-            // spun past the reset point); in the future → 5s tick releases it.
+        onAutoResumeSchedule: (sid, error) => {
+            if (error.kind === 'quota') {
+                // scheduledAt in the past → sendMessage sends immediately (SDK already
+                // spun past the reset point); in the future → 5s tick releases it.
+                void syncEngine?.sendMessage(sid, {
+                    text: QUOTA_RESUME_PROMPT,
+                    scheduledAt: error.resetsAtMs,
+                    localId: `auto-resume-${sid}-${error.resetsAtMs}`,
+                    sentFrom: 'system',
+                }).catch((e) => console.warn(`[auto-resume] quota schedule failed for ${sid}: ${e instanceof Error ? e.message : String(e)}`))
+                return
+            }
+            // rate [1302]: backoff retry (now + delay). tier = recent rate rows in
+            // the lookback window; cap (≥5) → silent stop (session idles for human).
+            // localId is windowed (floor(now/60s)) so repeat [1302] within 60s
+            // collapses via addMessage idempotency (防风暴, spec §6.5).
+            const now = Date.now()
+            const tier = store.messages.countRecentByLocalIdPrefix(sid, RATE_AUTO_RESUME_PREFIX, now - RATE_TIER_WINDOW_MS)
+            const backoff = computeRateBackoff(tier)
+            if (!backoff) return
             void syncEngine?.sendMessage(sid, {
-                text: QUOTA_RESUME_PROMPT,
-                scheduledAt: resetsAtMs,
-                localId: `auto-resume-${sid}-${resetsAtMs}`,
+                text: RATE_RESUME_PROMPT,
+                scheduledAt: now + backoff.delayMs,
+                localId: `${RATE_AUTO_RESUME_PREFIX}${sid}-${rateWindow(now)}`,
                 sentFrom: 'system',
-            }).catch((e) => console.warn(`[auto-resume] schedule failed for ${sid}: ${e instanceof Error ? e.message : String(e)}`))
+            }).catch((e) => console.warn(`[auto-resume] rate schedule failed for ${sid}: ${e instanceof Error ? e.message : String(e)}`))
         }
     })
 
