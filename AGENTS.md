@@ -28,15 +28,16 @@ This file is the editable source for the generated project `AGENTS.md`. Edit thi
 
 ## Permission Envelope
 
-- **Allowed without additional approval:** local code edits on `work/current`; side-effect-free local checks (typecheck, tests, lint) in a trusted workspace.
+- **Allowed without additional approval:** local code edits on feature branches off `main`; side-effect-free local checks (typecheck, tests, lint) in a trusted workspace.
 - **Requires approval:** anything reaching **live** **unless covered by the standing authorization below**. Live = systemd user services (`hapi-hub`, `hapi-web`, `hapi-runner`) running the `deploy` branch from worktree `/home/claw/deploy/hapi`; public via Cloudflare at `hapi.zhetengde.xyz`.
 - **Change → live flow:**
-  1. Develop on `work/current`; verify `bun typecheck && bun run test`.
-  2. Move to deploy: `cd /home/claw/deploy/hapi && git merge --ff-only work/current` (or `git cherry-pick <sha>`). `--ff-only` keeps deploy a clean mirror — refuses on divergence (fix on `work/current` first), never produces merge commits.
-  3. Apply by scope: web → `bun run build:web` then restart `hapi-web`; hub → restart `hapi-hub`; cli → restart `hapi-runner`; shared → restart all three. (hub/cli run source — no build.)
-  4. Restarting `hapi-hub`/`hapi-runner` interrupts running agent sessions.
-  5. Verify at `hapi.zhetengde.xyz` (or `localhost:3006` / `:5173`).
-- **Forbidden:** committing directly on `deploy`; any merge commit on `deploy` (use `--ff-only` only); running `bun run dev` while prod occupies ports 3006/5173 (stop prod first or use alt port).
+  1. Branch off `main` (`feature/<name>`); develop + verify `bun typecheck && bun run test`.
+  2. Push feature branch + open PR → `main`. CI gate (`.github/workflows/test.yml`: typecheck + test + build:web) must pass; **branch protection** requires the `test` check + linear history (merge rebase, no merge commit). Delete branch after merge.
+  3. After merge, move to deploy: `cd /home/claw/deploy/hapi && git merge --ff-only main`. `--ff-only` keeps deploy a clean mirror of `main` — refuses on divergence (fix on a new PR first), never produces merge commits.
+  4. Apply by scope: web → `bun run build:web` then restart `hapi-web`; hub → restart `hapi-hub`; cli → restart `hapi-runner`; shared → restart all three. (hub/cli run source — no build.)
+  5. Restarting `hapi-hub`/`hapi-runner` interrupts running agent sessions.
+  6. Verify at `hapi.zhetengde.xyz` (or `localhost:3006` / `:5173`).
+- **Forbidden:** committing directly on `deploy` or `main` (use PRs); any merge commit on `deploy`/`main` (branch protection enforces linear history); running `bun run dev` while prod occupies ports 3006/5173 (stop prod first or use alt port).
 - **Standing Authorization（用户授予，直到撤销；常规部署 auto 的权限来源）：**
   - **授权：** Routine 部署的 Goal B —— restart + 验证 + Routine 回滚（reset 到 last-good SHA + restart，**无 DB restore**）。
   - **触发（机械验，全满足才 auto）：** CI 过 + promotion SHA == deploy HEAD + 非 migration（`SCHEMA_VERSION` 数值未变，判定 fail-closed，见下）。
@@ -58,8 +59,8 @@ This file is the editable source for the generated project `AGENTS.md`. Edit thi
 > 详见 `doc/spec/agent-dev-loop.md`（设计稿 v2，Codex 审过）。Cortex 提供框架（Goal Contract / permission envelope / 原生验证声明）；循环执行靠 agent + `hapi-deploy-run`。
 
 单循环（一个 agent 循环贯穿 CI + 部署 + live 验证，失败回改）：
-- **本地验证门**：typecheck + test + build:web（在 `work/current` 跑）。
-- **promotion**：`git merge --ff-only work/current` → deploy worktree；**live SHA 必须等于 CI 过的 SHA**。
+- **本地验证门**：typecheck + test + build:web（feature 分支本地跑，PR CI 同门复跑）。
+- **promotion**：PR merge → `main` → `git merge --ff-only main` → deploy worktree；**live SHA 必须等于 CI 过的 SHA**。
 - **部署门**：准备（build + DB 快照 + 基线）→ 授权（envelope / 人批 migration）→ restart → 验证（`/health` + readiness + commit 校验）。
 - **失败回滚**：三路径（代码失败 / 部分迁移 / 迁移后失败），DB 快照为基础；先回滚保 live，再回改，**不在坏 live 上循环**。
 - **计数**：run ID + attempt ≤ K=8 / redeploy ≤ L=3，执行器强制 + 持久化（跨会话恢复）。**agent 目标任务生成 run-id，经 `HAPI_DEPLOY_RUN_ID=<run-id> hapi-deploy` 传入，跨 attempt 复用**（state: `~/.hapi/deploy-runs/<run-id>.json`）；超限 `hapi-deploy-run` 拒 + 钉钉叫人。
@@ -154,16 +155,17 @@ Live = systemd user services running **deploy branch** source from worktree `/ho
 | `hapi-web` | built `web/dist` via `vite preview` | `bun run build:web` → `restart hapi-web` |
 | `hapi-runner` | `cli/src/index.ts runner` (source) | `systemctl --user restart hapi-runner` |
 
-Branches: `main` → tracks `upstream/main`; `deploy` → live, worktree `/home/claw/deploy/hapi`; `work/current` → scratch sandbox (no remote, safe to break; changes here do NOT reach live).
+Branches: `main` → tracks `upstream/main`, PR target, **branch-protected** (required `test` check + linear history — no merge without green CI); `deploy` → live, worktree `/home/claw/deploy/hapi`; `feature/<name>` → short-lived, off `main`, one per PR, deleted post-merge. No `work/current` scratch branch — everything flows through PRs to `main`.
 
 ### Change → live
 
-1. Develop on `work/current`; verify `bun typecheck && bun run test`.
-2. Move to deploy: `cd /home/claw/deploy/hapi && git merge --ff-only work/current` (or `git cherry-pick <sha>`). `--ff-only` keeps deploy a clean mirror of work/current — refuses if deploy has diverged (fix it on `work/current` first), never produces merge commits. Never commit directly on `deploy`.
-3. Apply by scope: web → `bun run build:web` then restart `hapi-web`; hub → restart `hapi-hub`; cli → restart `hapi-runner`; shared → restart all three. (hub/cli run source — no build needed.)
-4. Restarting `hapi-hub`/`hapi-runner` interrupts running agent sessions.
-5. Verify at `hapi.zhetengde.xyz` (or `localhost:3006` / `:5173`).
-6. Sync upstream periodically: `git fetch upstream`; merge `upstream/main` → `main` → `deploy`.
+1. Branch off `main` (`feature/<name>`); develop + verify `bun typecheck && bun run test`.
+2. Push feature branch + open PR → `main`. CI (`.github/workflows/test.yml`: typecheck + test + build:web) must pass; branch protection requires the `test` check + linear history (merge rebase, never a merge commit). Delete branch after merge.
+3. Move to deploy: `cd /home/claw/deploy/hapi && git merge --ff-only main`. `--ff-only` keeps deploy a clean mirror of `main` — refuses if deploy has diverged (fix on a new PR first), never produces merge commits. Never commit directly on `deploy`.
+4. Apply by scope: web → `bun run build:web` then restart `hapi-web`; hub → restart `hapi-hub`; cli → restart `hapi-runner`; shared → restart all three. (hub/cli run source — no build needed.)
+5. Restarting `hapi-hub`/`hapi-runner` interrupts running agent sessions.
+6. Verify at `hapi.zhetengde.xyz` (or `localhost:3006` / `:5173`).
+7. Sync upstream periodically: `git fetch upstream`; merge `upstream/main` → `main` (via PR) → `deploy`.
 
 > `bun run dev` collides with prod ports 3006/5173 — stop prod services first or use alt port.
 
