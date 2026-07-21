@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { DecryptedMessage } from '@/types/api'
-import { computeCanCancel, computeEditPendingSchedule, getQueuedMessageEditText, getQueuedMessagePreview, sortQueuedMessages } from './QueuedMessagesBar'
+import { computeCanCancel, computeEditPendingSchedule, getQueuedMessageEditText, getQueuedMessagePreview, selectQueuedMessages, sortQueuedMessages } from './QueuedMessagesBar'
 import { formatScheduledTime } from '@/lib/scheduledTime'
 
 /**
@@ -231,5 +231,91 @@ describe('formatScheduledTime', () => {
         const crossYearDate = new Date(nextYear, 0, 15, 10, 30) // Jan 15 next year
         const result = formatScheduledTime(crossYearDate.getTime())
         expect(result).toContain(String(nextYear))
+    })
+})
+
+// ---------------------------------------------------------------------------
+// selectQueuedMessages — cross-bucket dedup regression
+// ---------------------------------------------------------------------------
+
+describe('selectQueuedMessages', () => {
+    // Regression: while the user is scrolled away from the bottom (atBottom=false),
+    // ingestIncomingMessages routes the user echo into `pending` while the
+    // optimistic copy still lives in `messages`. The bar must show ONE row — the
+    // server echo — so the optimistic bubble is collapsed and cancel/edit stay usable.
+    it('collapses an optimistic message and its server echo into a single row', () => {
+        const localId = 'local-abc'
+        const serverId = 'server-uuid-456'
+        const optimistic = {
+            id: localId,
+            localId,
+            createdAt: 1_000,
+            seq: null,
+            invokedAt: null,
+            status: 'queued',
+            content: { role: 'user', content: { type: 'text', text: 'hi' } },
+        } as unknown as DecryptedMessage
+        const echo = {
+            id: serverId,
+            localId,
+            createdAt: 1_000,
+            seq: 1,
+            invokedAt: null,
+            status: 'queued',
+            content: { role: 'user', content: { type: 'text', text: 'hi' } },
+        } as unknown as DecryptedMessage
+
+        const result = selectQueuedMessages([optimistic], [echo])
+
+        expect(result).toHaveLength(1)
+        // Survivor is the server-echoed copy (id !== localId), not the optimistic bubble.
+        expect(result[0]?.id).toBe(serverId)
+        // queued status is preserved on the survivor.
+        expect(result[0]?.status).toBe('queued')
+        // cancel/edit are usable: id !== localId → hasServerEcho true.
+        expect(
+            computeCanCancel({
+                id: result[0]!.id,
+                localId: result[0]!.localId,
+                isPending: false,
+            })
+        ).toBe(true)
+    })
+
+    it('keeps distinct queued messages from both buckets (no over-dedup)', () => {
+        const a = {
+            id: 'a',
+            localId: 'a',
+            createdAt: 1_000,
+            seq: null,
+            invokedAt: null,
+            status: 'queued',
+            content: { role: 'user', content: { type: 'text', text: 'a' } },
+        } as unknown as DecryptedMessage
+        const b = {
+            id: 'b',
+            localId: 'b',
+            createdAt: 2_000,
+            seq: null,
+            invokedAt: null,
+            status: 'queued',
+            content: { role: 'user', content: { type: 'text', text: 'b' } },
+        } as unknown as DecryptedMessage
+
+        const result = selectQueuedMessages([a], [b])
+        expect(result.map((m) => m.id).sort()).toEqual(['a', 'b'])
+    })
+
+    it('excludes already-invoked messages (not queued)', () => {
+        const invoked = {
+            id: 'invoked-1',
+            localId: 'invoked-1',
+            createdAt: 1_000,
+            seq: 1,
+            invokedAt: 5_000,
+            status: 'sent',
+            content: { role: 'user', content: { type: 'text', text: 'done' } },
+        } as unknown as DecryptedMessage
+        expect(selectQueuedMessages([invoked], [])).toHaveLength(0)
     })
 })

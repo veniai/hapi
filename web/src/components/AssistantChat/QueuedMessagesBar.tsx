@@ -2,7 +2,7 @@ import { useAssistantApi } from '@assistant-ui/react'
 import { useCallback, useMemo, useSyncExternalStore } from 'react'
 import type { ApiClient } from '@/api/client'
 import { getMessageWindowState, subscribeMessageWindow } from '@/lib/message-window-store'
-import { isQueuedForInvocation } from '@/lib/messages'
+import { isQueuedForInvocation, mergeMessages } from '@/lib/messages'
 import { EMPTY_STATE } from '@/hooks/queries/useMessages'
 import { normalizeDecryptedMessage } from '@/chat/normalize'
 import type { DecryptedMessage } from '@/types/api'
@@ -55,6 +55,31 @@ export function sortQueuedMessages(msgs: DecryptedMessage[]): DecryptedMessage[]
 }
 
 /**
+ * Derives the queued timeline for the floating bar from the two store buckets.
+ *
+ * Uses `mergeMessages` rather than a plain concat so an optimistic bubble still
+ * sitting in `messages` and its server echo sitting in `pending` collapse into a
+ * single row. Without this the bar renders two rows for one message while the
+ * user is scrolled away from the bottom: `atBottom=false` routes the user echo
+ * into `pending` (see `ingestIncomingMessages` in message-window-store), so for a
+ * window of time the optimistic copy lives in `messages` and the echo in
+ * `pending`, never co-merged.
+ *
+ * Parameter order is load-bearing: the optimistic copy must be the `existing`
+ * arg (`messages`) and the echo the `incoming` arg (`pending`) for
+ * `mergeMessages`' localId reconciliation to drop the optimistic bubble.
+ *
+ * @internal Exported for unit testing.
+ */
+export function selectQueuedMessages(
+    messages: DecryptedMessage[],
+    pending: DecryptedMessage[]
+): DecryptedMessage[] {
+    const allMessages = mergeMessages(messages, pending)
+    return sortQueuedMessages(allMessages.filter(isQueuedForInvocation))
+}
+
+/**
  * Returns user messages that haven't been invoked yet (invokedAt == null and not sent/failed).
  * Covers both optimistic (status='queued') and server-loaded (status=undefined, invokedAt=null) cases.
  */
@@ -65,15 +90,9 @@ function useQueuedMessages(sessionId: string): DecryptedMessage[] {
         () => EMPTY_STATE
     )
 
-    // `invokedAt` is the source of truth for invocation; see isQueuedForInvocation
-    // (lib/messages) for the shared predicate used by the thread filter and the
-    // window store trim helpers.
     // useSyncExternalStore guarantees a stable reference when the snapshot is
     // unchanged, so [state] as the dependency avoids unnecessary re-sorts.
-    return useMemo(() => {
-        const allMessages = [...state.messages, ...state.pending]
-        return sortQueuedMessages(allMessages.filter(isQueuedForInvocation))
-    }, [state])
+    return useMemo(() => selectQueuedMessages(state.messages, state.pending), [state])
 }
 
 /** @internal Exported for unit testing. */
