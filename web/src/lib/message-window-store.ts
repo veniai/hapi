@@ -1,4 +1,4 @@
-import { ApiError, type ApiClient } from '@/api/client'
+import { type ApiClient } from '@/api/client'
 import type { DecryptedMessage, MessageStatus, MessagesResponse } from '@/types/api'
 import { normalizeDecryptedMessage } from '@/chat/normalize'
 import { isQueuedForInvocation, isUserMessage, mergeMessages } from '@/lib/messages'
@@ -48,10 +48,10 @@ type InternalState = MessageWindowState & {
     // a recomputed minimum `seq` from the local window (those can refer to
     // different rows after a low-seq message is invoked late).
     oldestPositionSeq: number | null
-    // Forward pagination cursor (newer-than-cursor). Set by fetchLocatedWindow
-    // (newerCursor) when the located window has messages beyond it, and advanced
-    // by fetchNewerMessages. hasNewer=false means the window already reaches the
-    // latest message.
+    // Forward pagination cursor (newer-than-cursor). Set by the prepend-trim
+    // path (cursorUpdatesAfterPrependTrim) when backward pagination drops the
+    // newest slice, and advanced by fetchNewerMessages. hasNewer=false means
+    // the window already reaches the latest message.
     newestPositionAt: number | null
     newestPositionSeq: number | null
 }
@@ -920,15 +920,6 @@ export function getMessageWindowState(sessionId: string): MessageWindowState {
     return getState(sessionId)
 }
 
-/** True when the cached window already contains the DB row behind a raw or
- * composite DOM message id (`user-text:<uuid>`, `agent-text:<uuid>:0`, ...). */
-export function messageWindowContainsTarget(sessionId: string, targetMessageId: string): boolean {
-    const targetParts = new Set(targetMessageId.split(':'))
-    return getState(sessionId).messages.some((message) =>
-        message.id === targetMessageId || targetParts.has(message.id)
-    )
-}
-
 export function subscribeMessageWindow(sessionId: string, listener: () => void): () => void {
     const subs = listeners.get(sessionId) ?? new Set()
     subs.add(listener)
@@ -958,6 +949,28 @@ export function clearMessageWindow(sessionId: string): void {
         newerGeneration: previous.newerGeneration + 1,
         windowEpoch: previous.windowEpoch + 1,
     }, true)
+}
+
+/** Test-only seed: put a window into a forward-pagination state (hasNewer +
+ *  newestPosition cursor) so fetchNewerMessages tests don't depend on a
+ *  network fetch to set it up. */
+export function seedMessageWindowForTest(
+    sessionId: string,
+    patch: {
+        messages: DecryptedMessage[]
+        hasNewer: boolean
+        newestPositionAt: number | null
+        newestPositionSeq: number | null
+    }
+): void {
+    updateState(sessionId, (prev) => buildState(prev, {
+        messages: patch.messages,
+        hasNewer: patch.hasNewer,
+        newestPositionAt: patch.newestPositionAt,
+        newestPositionSeq: patch.newestPositionSeq,
+        hasLoadedLatest: !patch.hasNewer,
+        atBottom: !patch.hasNewer,
+    }), true)
 }
 
 export function seedMessageWindowFromSession(fromSessionId: string, toSessionId: string): void {
@@ -1084,63 +1097,6 @@ export async function fetchLatestMessages(api: ApiClient, sessionId: string): Pr
     }
 }
 
-export async function fetchLocatedWindow(
-    api: ApiClient,
-    sessionId: string,
-    targetMessageId: string,
-    options?: { beforeLimit?: number; afterLimit?: number }
-): Promise<{ ok: true } | { ok: false; reason: 'not-found' | 'failed' }> {
-    const initial = getState(sessionId)
-    // A locator is the entry owner. beginReplacementGeneration invalidates an
-    // older reconnect/latest generation so its late response cannot overwrite
-    // the target window.
-    const { generation } = beginReplacementGeneration(sessionId, 'latest', { isLoading: true, warning: null })
-    try {
-        const window = await api.locateMessageWindow(sessionId, targetMessageId, options) as {
-            messages: typeof initial.messages
-            target: { at: number; seq: number } | null
-            olderCursor: { at: number; seq: number } | null
-            hasOlder: boolean
-            newerCursor: { at: number; seq: number } | null
-            hasNewer: boolean
-        }
-        if (!isCurrentGeneration(sessionId, 'latest', generation)) {
-            return { ok: true }
-        }
-        updateStateForGeneration(sessionId, 'latest', generation, (prev) => {
-            return buildState(prev, {
-                messages: window.messages,
-                pending: [],
-                pendingOverflowCount: 0,
-                pendingVisibleCount: 0,
-                pendingOverflowVisibleCount: 0,
-                hasMore: window.hasOlder,
-                hasNewer: window.hasNewer,
-                oldestPositionAt: window.olderCursor?.at ?? null,
-                oldestPositionSeq: window.olderCursor?.seq ?? null,
-                newestPositionAt: window.newerCursor?.at ?? null,
-                newestPositionSeq: window.newerCursor?.seq ?? null,
-                isLoading: false,
-                hasLoadedLatest: !window.hasNewer,
-                atBottom: !window.hasNewer,
-                warning: null,
-            })
-        })
-        return { ok: true }
-    } catch (error) {
-        if (!isCurrentGeneration(sessionId, 'latest', generation)) {
-            return { ok: true }
-        }
-        // Only a real HTTP 404 means the target is gone → caller may clear saved.
-        // Network blips / 5xx / anything else must NOT clear the saved anchor.
-        const isNotFound = error instanceof ApiError && error.status === 404
-        updateStateForGeneration(sessionId, 'latest', generation, (prev) =>
-            buildState(prev, { isLoading: false, warning: isNotFound ? null : 'Failed to locate' })
-        )
-        return { ok: false, reason: isNotFound ? 'not-found' : 'failed' }
-    }
-}
-
 export async function fetchOlderMessages(api: ApiClient, sessionId: string): Promise<void> {
     const initial = getState(sessionId)
     if (initial.isLoadingMore || !initial.hasMore) {
@@ -1186,7 +1142,7 @@ export async function fetchOlderMessages(api: ApiClient, sessionId: string): Pro
 }
 
 /** Page forward (newer-than-cursor) from a located window toward the latest
- *  messages. Used after fetchLocatedWindow when the window has messages beyond
+ *  messages. Used when the window has newer messages beyond it
  *  it (hasNewer=true). Each call advances newestPosition; when the server reports
  *  no more newer messages the window is flipped to atBottom + hasLoadedLatest. */
 export async function fetchNewerMessages(api: ApiClient, sessionId: string): Promise<void> {

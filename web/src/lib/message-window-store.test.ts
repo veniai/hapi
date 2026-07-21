@@ -1,11 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ApiError, type ApiClient } from '@/api/client'
+import { type ApiClient } from '@/api/client'
 import type { DecryptedMessage, MessageStatus } from '@/types/api'
 import {
     appendOptimisticMessage,
     clearMessageWindow,
     fetchLatestMessages,
-    fetchLocatedWindow,
     fetchNewerMessages,
     gcMessageWindows,
     fetchOlderMessages,
@@ -14,6 +13,7 @@ import {
     markMessagesConsumed,
     reconcileQueuedAgainstLatest,
     removeOptimisticMessage,
+    seedMessageWindowForTest,
     setAtBottom,
     VISIBLE_WINDOW_SIZE,
     updateMessageStatus,
@@ -756,99 +756,6 @@ describe('gcMessageWindows', () => {
     })
 })
 
-describe('fetchLocatedWindow', () => {
-    const SESSION_ID = 'session-locate-test'
-
-    afterEach(() => {
-        clearMessageWindow(SESSION_ID)
-    })
-
-    it('locates the window on the target and derives atBottom/hasMore from cursors', async () => {
-        const target = makeAgentMessage({ id: 'target-msg', seq: 5, createdAt: 1_000 })
-        const api = {
-            locateMessageWindow: vi.fn(async () => ({
-                messages: [target],
-                target: { at: 1_000, seq: 5 },
-                olderCursor: { at: 900, seq: 4 },
-                hasOlder: true,
-                newerCursor: null,
-                hasNewer: false
-            }))
-        } as Pick<ApiClient, 'locateMessageWindow'> & {
-            locateMessageWindow: ReturnType<typeof vi.fn>
-        }
-
-        const result = await fetchLocatedWindow(api as unknown as ApiClient, SESSION_ID, 'target-msg')
-
-        expect(result).toEqual({ ok: true })
-        const state = getMessageWindowState(SESSION_ID)
-        expect(state.messages.map((m) => m.id)).toEqual(['target-msg'])
-        expect(state.hasMore).toBe(true)          // ← hasOlder
-        expect(state.atBottom).toBe(true)         // ← !hasNewer
-        expect(state.hasLoadedLatest).toBe(true)  // ← !hasNewer
-    })
-
-    it('marks atBottom=false + hasLoadedLatest=false when newer messages exist beyond the window', async () => {
-        const target = makeAgentMessage({ id: 'target-msg', seq: 5, createdAt: 1_000 })
-        const api = {
-            locateMessageWindow: vi.fn(async () => ({
-                messages: [target],
-                target: { at: 1_000, seq: 5 },
-                olderCursor: null,
-                hasOlder: false,
-                newerCursor: { at: 1_100, seq: 6 },
-                hasNewer: true
-            }))
-        } as unknown as ApiClient
-
-        await fetchLocatedWindow(api, SESSION_ID, 'target-msg')
-
-        const state = getMessageWindowState(SESSION_ID)
-        expect(state.atBottom).toBe(false)
-        expect(state.hasLoadedLatest).toBe(false)
-        expect(state.hasMore).toBe(false)         // !hasOlder
-    })
-
-    it('returns not-found on HTTP 404 (target gone) — caller may clear saved', async () => {
-        const api = {
-            locateMessageWindow: vi.fn(async () => {
-                throw new ApiError('HTTP 404 Not Found', 404)
-            })
-        } as unknown as ApiClient
-
-        const result = await fetchLocatedWindow(api, SESSION_ID, 'gone-msg')
-
-        expect(result).toEqual({ ok: false, reason: 'not-found' })
-    })
-
-    it('returns failed (NOT not-found) on 500 / network — saved must survive', async () => {
-        const api = {
-            locateMessageWindow: vi.fn(async () => {
-                throw new ApiError('HTTP 500', 500)
-            })
-        } as unknown as ApiClient
-
-        const result = await fetchLocatedWindow(api, SESSION_ID, 'target-msg')
-
-        expect(result).toEqual({ ok: false, reason: 'failed' })
-    })
-
-    it('locator supersedes an in-flight latest load', async () => {
-        const slowApi = {
-            locateMessageWindow: vi.fn(async () => ({ messages: [], target: null, olderCursor: null, hasOlder: false, newerCursor: null, hasNewer: false })),
-            getMessages: vi.fn(async () => {
-                await new Promise((r) => setTimeout(r, 50))
-                return { messages: [], page: { limit: 50, nextBeforeAt: null, nextBeforeSeq: null, hasMore: false } }
-            })
-        } as unknown as ApiClient
-        const p = fetchLatestMessages(slowApi as unknown as ApiClient, SESSION_ID) // sets isLoading
-        const result = await fetchLocatedWindow(slowApi as unknown as ApiClient, SESSION_ID, 'target-msg')
-        await p
-        expect(result).toEqual({ ok: true })
-        expect(slowApi.locateMessageWindow).toHaveBeenCalledTimes(1)
-    })
-})
-
 describe('fetchNewerMessages', () => {
     const SESSION_ID = 'session-newer-test'
 
@@ -856,19 +763,14 @@ describe('fetchNewerMessages', () => {
         clearMessageWindow(SESSION_ID)
     })
 
-    async function seedLocatedWindow(hasNewer: boolean, newerCursor: { at: number; seq: number } | null) {
+    function seedLocatedWindow(hasNewer: boolean, newerCursor: { at: number; seq: number } | null) {
         const target = makeAgentMessage({ id: 'target', seq: 5, createdAt: 1_000 })
-        const api = {
-            locateMessageWindow: vi.fn(async () => ({
-                messages: [target],
-                target: { at: 1_000, seq: 5 },
-                olderCursor: null,
-                hasOlder: false,
-                newerCursor,
-                hasNewer
-            }))
-        } as unknown as ApiClient
-        await fetchLocatedWindow(api, SESSION_ID, 'target')
+        seedMessageWindowForTest(SESSION_ID, {
+            messages: [target],
+            hasNewer,
+            newestPositionAt: newerCursor?.at ?? null,
+            newestPositionSeq: newerCursor?.seq ?? null
+        })
     }
 
     it('pages forward from the newestPosition cursor and flips atBottom when reaching the latest', async () => {
