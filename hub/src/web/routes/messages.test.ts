@@ -243,69 +243,6 @@ describe('POST /api/sessions/:id/messages — inactive session response shape', 
 })
 
 // ---------------------------------------------------------------------------
-// GET /sessions/:id/messages/locate — locator window (§4.3)
-// ---------------------------------------------------------------------------
-
-function createLocateApp(locateImpl: (...args: unknown[]) => unknown) {
-    const engine = {
-        resolveSessionAccess: () => ({
-            ok: true,
-            sessionId: 'session-1',
-            session: { id: 'session-1', active: true }
-        }),
-        locateMessageWindow: locateImpl,
-    } as unknown as SyncEngine
-    const app = new Hono<WebAppEnv>()
-    app.use('*', async (c, next) => {
-        c.set('namespace', 'default')
-        await next()
-    })
-    app.route('/api', createMessagesRoutes(() => engine as SyncEngine))
-    return app
-}
-
-describe('GET /api/sessions/:id/messages/locate', () => {
-    const UUID = '11111111-1111-4111-8111-111111111111'
-
-    it('200 — returns the located window', async () => {
-        const window = {
-            messages: [],
-            target: { at: 1, seq: 1 },
-            olderCursor: null,
-            hasOlder: false,
-            newerCursor: null,
-            hasNewer: false
-        }
-        const app = createLocateApp(() => ({ type: 'success', window }))
-        const res = await app.request(`/api/sessions/abc/messages/locate?messageId=${UUID}`)
-        expect(res.status).toBe(200)
-        const body = await res.json() as { target: { at: number; seq: number } }
-        expect(body.target).toEqual({ at: 1, seq: 1 })
-    })
-
-    it('404 — message not found in session', async () => {
-        const app = createLocateApp(() => ({ type: 'not-found' }))
-        const res = await app.request(`/api/sessions/abc/messages/locate?messageId=${UUID}`)
-        expect(res.status).toBe(404)
-    })
-
-    it('400 — empty messageId rejected by Zod (min length 1)', async () => {
-        const app = createLocateApp(() => ({ type: 'success', window: {} }))
-        const res = await app.request('/api/sessions/abc/messages/locate?messageId=')
-        expect(res.status).toBe(400)
-    })
-
-    it('200 — composite id (agent-reasoning:<uuid>:0) accepted; hub extracts the uuid', async () => {
-        const app = createLocateApp(() => ({
-            type: 'success',
-            window: { messages: [], target: { at: 1, seq: 1 }, olderCursor: null, hasOlder: false, newerCursor: null, hasNewer: false }
-        }))
-        const res = await app.request('/api/sessions/abc/messages/locate?messageId=agent-reasoning%3A11111111-1111-4111-8111-111111111111%3A0')
-        expect(res.status).toBe(200)
-    })
-})
-
-// ---------------------------------------------------------------------------
 // GET /sessions/:id/messages — afterAt/afterSeq forward pagination (§4.3)
 // ---------------------------------------------------------------------------
 

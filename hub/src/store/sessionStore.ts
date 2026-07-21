@@ -11,7 +11,6 @@ import {
     advanceHandledRev,
     bumpAttentionRev,
     setSessionEffort,
-    setSessionReadPosition,
     setSessionModel,
     setSessionModelReasoningEffort,
     setSessionServiceTier,
@@ -98,16 +97,6 @@ export class SessionStore {
 
     setSessionServiceTier(id: string, serviceTier: string | null, namespace: string, options?: { touchUpdatedAt?: boolean }): boolean {
         return setSessionServiceTier(this.db, id, serviceTier, namespace, options)
-    }
-
-    setSessionReadPosition(
-        id: string,
-        namespace: string,
-        messageId: string,
-        observedAt: number,
-        expectedLastReadAt: number | null
-    ): { result: 'success' } | { result: 'stale' } | { result: 'not-found' } {
-        return setSessionReadPosition(this.db, id, namespace, messageId, observedAt, expectedLastReadAt)
     }
 
     touchSessionUpdatedAt(id: string, updatedAt: number, namespace: string): boolean {

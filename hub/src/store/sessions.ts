@@ -514,33 +514,6 @@ export function setSessionServiceTier(
     }
 }
 
-export function setSessionReadPosition(
-    db: Database,
-    id: string,
-    namespace: string,
-    messageId: string,
-    observedAt: number,
-    expectedLastReadAt: number | null
-): { result: 'success' } | { result: 'stale' } | { result: 'not-found' } {
-    const exists = db.prepare('SELECT 1 FROM sessions WHERE id = ? AND namespace = ?').get(id, namespace)
-    if (!exists) return { result: 'not-found' }
-    const result = db.prepare(`
-        UPDATE sessions
-        SET last_read_message_id = @messageId,
-            last_read_at = @observedAt,
-            seq = seq + 1
-        WHERE id = @id
-          AND namespace = @namespace
-          AND (
-              last_read_at IS NULL
-              OR last_read_at < @observedAt
-              OR (last_read_at = @observedAt AND last_read_message_id < @messageId)
-          )
-          AND (last_read_at = @expectedLastReadAt OR @expectedLastReadAt IS NULL)
-    `).run({ id, namespace, messageId, observedAt, expectedLastReadAt })
-    return result.changes === 1 ? { result: 'success' } : { result: 'stale' }
-}
-
 /** Atomically increment a session's attention revision and return the new
  *  value (web-chat-read-position-sync §2.1). Called by the hub at
  *  attention-worthy transitions: agent result content arriving, a
