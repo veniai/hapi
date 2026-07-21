@@ -52,8 +52,6 @@ function toProtocolSession(session: ReturnType<typeof makeSession>): Session {
         serviceTier: session.serviceTier,
         permissionMode: 'default',
         collaborationMode: 'default',
-        lastReadMessageId: null,
-        lastReadAt: null,
         attentionRev: 0,
         handledRev: 0,
     }

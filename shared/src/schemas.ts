@@ -229,8 +229,6 @@ export const SessionSchema = z.object({
     serviceTier: z.string().nullable().optional().default(null),
     permissionMode: PermissionModeSchema.optional(),
     collaborationMode: CodexCollaborationModeSchema.optional(),
-    lastReadMessageId: z.string().nullable().optional(),
-    lastReadAt: z.number().nullable().optional(),
     // web-chat-read-position-sync §2.1: monotonic attention revision (bumps on
     // attention-worthy events) + shared handled revision (advances on send).
     // Optional to match the lastRead* convention — the hub always populates
@@ -435,11 +433,6 @@ export const SyncEventSchema = z.discriminatedUnion('type', [
         type: z.literal('message-cancelled'),
         messageId: z.string(),
         localId: z.string().optional()
-    }),
-    SessionChangedSchema.extend({
-        type: z.literal('session-read-position'),
-        messageId: z.string(),
-        updatedAt: z.number()
     }),
     SessionEventBaseSchema.extend({
         type: z.literal('heartbeat'),

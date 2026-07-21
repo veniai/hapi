@@ -20,8 +20,6 @@ export type StoredSession = {
     active: boolean
     activeAt: number | null
     seq: number
-    lastReadMessageId: string | null
-    lastReadAt: number | null
     attentionRev: number
     handledRev: number
 }

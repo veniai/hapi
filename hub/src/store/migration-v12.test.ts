@@ -9,7 +9,7 @@ describe('migration v11 → v12 (attention_rev + handled_rev)', () => {
         expect(columns).toContain('attention_rev')
         expect(columns).toContain('handled_rev')
         const uv = (store['db'].prepare('PRAGMA user_version').get() as { user_version: number }).user_version
-        expect(uv).toBe(12)
+        expect(uv).toBe(13)
         store.close()
     })
 

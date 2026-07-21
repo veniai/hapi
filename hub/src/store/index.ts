@@ -23,7 +23,7 @@ export { PushStore } from './pushStore'
 export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
 
-const SCHEMA_VERSION: number = 12
+const SCHEMA_VERSION: number = 13
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -126,6 +126,7 @@ export class Store {
             9: () => this.migrateFromV9ToV10(),
             10: () => this.migrateFromV10ToV11(),
             11: () => this.migrateFromV11ToV12(),
+            12: () => this.migrateFromV12ToV13(),
         })
 
         if (currentVersion === 0) {
@@ -195,8 +196,6 @@ export class Store {
                 active INTEGER DEFAULT 0,
                 active_at INTEGER,
                 seq INTEGER DEFAULT 0,
-                last_read_message_id TEXT,
-                last_read_at INTEGER,
                 attention_rev INTEGER NOT NULL DEFAULT 0,
                 handled_rev INTEGER NOT NULL DEFAULT 0
             );
@@ -467,6 +466,24 @@ export class Store {
         }
         if (!columns.has('handled_rev')) {
             this.db.exec('ALTER TABLE sessions ADD COLUMN handled_rev INTEGER NOT NULL DEFAULT 0')
+        }
+    }
+
+    // V12 → V13: drop dead read-position columns. web-chat-read-position-sync
+    // §3.2.5 cross-device restore was reverted (commit 5ffc151); single-device
+    // restore runs via TanStack Router scrollRestoration. After the web/hub
+    // dead-code cleanup these two columns have no live writers/readers.
+    // Idempotent: PRAGMA table_info guard makes re-runs a no-op. SQLite ≥3.35.0
+    // (bun:sqlite ships 3.53.0) supports ALTER TABLE DROP COLUMN; the columns
+    // carry no index / UNIQUE / FK / generated dependency.
+    private migrateFromV12ToV13(): void {
+        const columns = this.getSessionColumnNames()
+        if (columns.size === 0) return
+        if (columns.has('last_read_message_id')) {
+            this.db.exec('ALTER TABLE sessions DROP COLUMN last_read_message_id')
+        }
+        if (columns.has('last_read_at')) {
+            this.db.exec('ALTER TABLE sessions DROP COLUMN last_read_at')
         }
     }
 
