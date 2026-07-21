@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { MessagesQuerySchema, MessageLocateQuerySchema, SendMessageRequestSchema } from '@hapi/protocol'
+import { MessagesQuerySchema, SendMessageRequestSchema } from '@hapi/protocol'
 import type { SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { requireSessionFromParam, requireSyncEngine } from './guards'
@@ -35,26 +35,6 @@ export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json(engine.getMessagesAfterPage(sessionId, { limit, after }))
         }
         return c.json(engine.getMessagesPage(sessionId, { limit, before }))
-    })
-
-    app.get('/sessions/:id/messages/locate', async (c) => {
-        const engine = requireSyncEngine(c, getSyncEngine)
-        if (engine instanceof Response) return engine
-        const sessionResult = requireSessionFromParam(c, engine)
-        if (sessionResult instanceof Response) return sessionResult
-        const parsed = MessageLocateQuerySchema.safeParse(c.req.query())
-        if (!parsed.success) return c.json({ error: 'Invalid query', issues: parsed.error.flatten() }, 400)
-        const { messageId, beforeLimit, afterLimit } = parsed.data
-        const result = engine.locateMessageWindow(
-            sessionResult.sessionId, c.get('namespace'), messageId, { beforeLimit, afterLimit }
-        )
-        if (result.type !== 'success') {
-            return c.json({
-                error: result.type === 'access-denied' ? 'Access denied' : 'Message not found in session',
-                code: result.type === 'access-denied' ? 'access_denied' : 'message_not_found'
-            }, 404)
-        }
-        return c.json(result.window)
     })
 
     app.delete('/sessions/:id/messages/:messageId', async (c) => {

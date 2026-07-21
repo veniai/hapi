@@ -233,8 +233,8 @@ export class MessageService {
             hasMore: boolean
         }
     } {
-        // Fetch limit+1 to detect hasMore without a second round-trip (same trick
-        // as locateMessageWindow's before/after+1).
+        // Fetch limit+1 to detect hasMore without a second round-trip (same
+        // limit+1 trick as getMessagesPage).
         const fetched = this.store.messages.getMessagesByPositionAfter(
             sessionId,
             options.limit + 1,
