@@ -231,9 +231,9 @@ export const SessionSchema = z.object({
     collaborationMode: CodexCollaborationModeSchema.optional(),
     // web-chat-read-position-sync §2.1: monotonic attention revision (bumps on
     // attention-worthy events) + shared handled revision (advances on send).
-    // Optional to match the lastRead* convention — the hub always populates
-    // them (migration v12 backfills 0) and the summary shapes them as required
-    // numbers; consumers read defensively (?? 0).
+    // Optional + defensive: the hub always populates them (migration v12
+    // backfills 0), but older cached summaries may omit them, so consumers
+    // read with ?? 0.
     attentionRev: z.number().optional(),
     handledRev: z.number().optional(),
     // web-chat-read-position-sync §2.3: cache-only hint (not persisted) for the

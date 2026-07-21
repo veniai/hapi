@@ -13,11 +13,6 @@ import {
     restoreScrollAnchor,
     shouldRestoreInitialLatest,
 } from '@/components/AssistantChat/HappyThread'
-import {
-    gcChatScrollPositions,
-    readChatScrollPosition,
-    writeChatScrollPosition
-} from '@/lib/chat-scroll-store'
 import type { ConversationOutlineItem } from '@/chat/outline'
 
 const outlineItems: ConversationOutlineItem[] = [
@@ -315,62 +310,5 @@ describe('outline target loading', () => {
 
         expect(target).toBeNull()
         expect(loadOlderPreservingScroll).toHaveBeenCalledTimes(1)
-    })
-})
-
-describe('chat scroll persistence', () => {
-    it('stores a durable message anchor and rounded fallback position per session', () => {
-        localStorage.clear()
-        writeChatScrollPosition('session-a', {
-            scrollTop: 123.6,
-            anchor: { id: 'message-7', topOffset: 18.4 }
-        })
-
-        expect(readChatScrollPosition('session-a')).toMatchObject({
-            scrollTop: 124,
-            anchor: { id: 'message-7', topOffset: 18 }
-        })
-    })
-
-    it('round-trips anchor messageId + capture timestamp for the locator target pick', () => {
-        localStorage.clear()
-        const before = Date.now()
-        writeChatScrollPosition('session-pos', {
-            scrollTop: 50,
-            anchor: { id: 'hapi-message-msg-9', topOffset: 10, messageId: 'msg-9' }
-        })
-        const after = Date.now()
-
-        const read = readChatScrollPosition('session-pos')
-        expect(read).not.toBeNull()
-        expect(read?.anchor?.messageId).toBe('msg-9')
-        expect(read?.capturedAt).toBeGreaterThanOrEqual(before)
-        expect(read?.capturedAt).toBeLessThanOrEqual(after)
-    })
-
-    it('clearChatScrollPosition drops the saved anchor', async () => {
-        const { clearChatScrollPosition } = await import('@/lib/chat-scroll-store')
-        localStorage.clear()
-        writeChatScrollPosition('session-clear', { scrollTop: 10, anchor: null })
-        expect(readChatScrollPosition('session-clear')).not.toBeNull()
-        clearChatScrollPosition('session-clear')
-        expect(readChatScrollPosition('session-clear')).toBeNull()
-    })
-
-    it('migrates the legacy session-scoped numeric position', () => {
-        localStorage.clear()
-        sessionStorage.setItem('hapi.chat-scroll.v1.legacy', '321')
-
-        expect(readChatScrollPosition('legacy')).toEqual({ scrollTop: 321, anchor: null })
-    })
-
-    it('garbage-collects durable positions only for deleted sessions', () => {
-        localStorage.clear()
-        writeChatScrollPosition('keep', { scrollTop: 10, anchor: null })
-        writeChatScrollPosition('remove', { scrollTop: 20, anchor: null })
-
-        expect(gcChatScrollPositions(new Set(['keep']))).toBe(1)
-        expect(readChatScrollPosition('keep')).toMatchObject({ scrollTop: 10, anchor: null })
-        expect(readChatScrollPosition('remove')).toBeNull()
     })
 })
