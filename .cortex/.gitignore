@@ -1,0 +1,6 @@
+.state/
+reconcile.md
+drifted-AGENTS.md
+exported-AGENTS.md
+verify/*.prompt
+verify/*.report
