@@ -108,6 +108,15 @@ export class MessageStore {
         return countMessages(this.db, sessionId)
     }
 
+    /** Count messages in a session whose local_id starts with `prefix` and were
+     *  created at/after `sinceMs`. Used by [1302] rate backoff tier (spec §6.5). */
+    countRecentByLocalIdPrefix(sessionId: string, prefix: string, sinceMs: number): number {
+        const row = this.db.prepare(
+            'SELECT COUNT(*) as n FROM messages WHERE session_id = ? AND local_id LIKE ? AND created_at >= ?'
+        ).get(sessionId, prefix + '%', sinceMs) as { n: number }
+        return row.n
+    }
+
     cancelQueuedMessage(sessionId: string, messageId: string): CancelQueuedMessageResult {
         return cancelQueuedMessage(this.db, sessionId, messageId)
     }

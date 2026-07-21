@@ -11,6 +11,7 @@ import { registerTerminalHandlers } from './handlers/terminal'
 import { RpcRegistry } from './rpcRegistry'
 import { SOCKET_MAX_HTTP_BUFFER_SIZE } from './socketLimits'
 import type { SyncEvent } from '../sync/syncEngine'
+import type { SyntheticError } from '../sync/autoResume'
 import { TerminalRegistry } from './terminalRegistry'
 import type { CliSocketWithData, SocketData, SocketServer } from './socketTypes'
 
@@ -46,7 +47,7 @@ export type SocketServerDeps = {
     onAttentionBump?: (sessionId: string) => void
     onSweepImmediateQueued?: (sessionId: string, now: number) => void
     onMessagesConsumed?: (sessionId: string) => void
-    onAutoResumeSchedule?: (sessionId: string, resetsAtMs: number, code: string) => void
+    onAutoResumeSchedule?: (sessionId: string, error: SyntheticError) => void
 }
 
 export function createSocketServer(deps: SocketServerDeps): {
