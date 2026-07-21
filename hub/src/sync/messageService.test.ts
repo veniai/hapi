@@ -935,6 +935,42 @@ describe('MessageService.releaseMatureScheduledMessages', () => {
         return { io, cliEmitted }
     }
 
+    it('releases an auto-resume scheduled row (sendMessage → /cli new-message)', async () => {
+        const store = makeStore()
+        const session = makeSession(store, 'auto-resume-bridge')
+        const publisher = makePublisher()
+        const { io, cliEmitted } = makeTrackingIo()
+
+        const service = new MessageService(store, io, publisher as any)
+
+        const future = Date.now() + 60_000
+        const localId = `auto-resume-${session.id}-${future}`
+
+        // Auto-resume path: sendMessage with sentFrom:'system' + deterministic
+        // localId + future scheduledAt (mirrors the startHub config point, §6.3).
+        await service.sendMessage(session.id, {
+            text: 'resume prompt',
+            localId,
+            sentFrom: 'system',
+            scheduledAt: future,
+        })
+
+        // Future scheduledAt → no immediate /cli emit (waits for the tick).
+        expect(cliEmitted).toHaveLength(0)
+
+        // L4 persistence: the row landed in SQLite and is retrievable as mature.
+        const beforeRelease = store.messages.getMatureScheduledMessages(future + 1)
+        expect(beforeRelease.some((m) => m.localId === localId)).toBe(true)
+
+        // L3 bridge: releasing after the reset time → /cli new-message. This reuses
+        // the existing release contract (covered above); this case only proves the
+        // auto-resume row enters it. Do NOT assert invoked_at (pitfall #2: release
+        // does not stamp it — CLI messages-consumed ack does; that is L6's job).
+        const matured = service.releaseMatureScheduledMessages(future + 1)
+        expect(cliEmitted).toHaveLength(1)
+        expect(matured.has(session.id)).toBe(true)
+    })
+
     it('emits mature messages to /cli', async () => {
         const store = makeStore()
         const session = makeSession(store, 'release-emit')

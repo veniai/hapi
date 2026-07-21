@@ -46,6 +46,7 @@ export type SocketServerDeps = {
     onAttentionBump?: (sessionId: string) => void
     onSweepImmediateQueued?: (sessionId: string, now: number) => void
     onMessagesConsumed?: (sessionId: string) => void
+    onAutoResumeSchedule?: (sessionId: string, resetsAtMs: number, code: string) => void
 }
 
 export function createSocketServer(deps: SocketServerDeps): {
@@ -129,7 +130,8 @@ export function createSocketServer(deps: SocketServerDeps): {
         onSessionActivity: deps.onSessionActivity,
         onAttentionBump: deps.onAttentionBump,
         onSweepImmediateQueued: deps.onSweepImmediateQueued,
-        onMessagesConsumed: deps.onMessagesConsumed
+        onMessagesConsumed: deps.onMessagesConsumed,
+        onAutoResumeSchedule: deps.onAutoResumeSchedule
     }))
 
     terminalNs.use(async (socket, next) => {

@@ -520,7 +520,7 @@ export class SyncEngine {
                 path: string
                 previewUrl?: string
             }>
-            sentFrom?: 'telegram-bot' | 'webapp'
+            sentFrom?: 'telegram-bot' | 'webapp' | 'system'
             scheduledAt?: number | null
         }
     ): Promise<void> {

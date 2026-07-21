@@ -37,6 +37,140 @@ function redundantGoalStatusContent(message: string): unknown {
     }
 }
 
+describe('auto-resume hook (onAutoResumeSchedule)', () => {
+    function syntheticContent(text: string, model = '<synthetic>'): unknown {
+        return {
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    message: {
+                        type: 'message',
+                        role: 'assistant',
+                        model,
+                        content: [{ type: 'text', text }]
+                    }
+                }
+            }
+        }
+    }
+
+    const QUOTA_TEXT =
+        'API Error: Request rejected (429) · [1308][已达到 5 小时的使用上限。您的限额将在 2026-07-17 16:01:19 重置。]'
+
+    it('invokes onAutoResumeSchedule with sid + code + reset time for a synthetic quota error', () => {
+        const calls: Array<{ sid: string; resetsAtMs: number; code: string }> = []
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('auto-resume-quota', {}, null, 'default')
+        const socket = new FakeSocket()
+        registerSessionHandlers(socket as unknown as CliSocketWithData, {
+            store,
+            resolveSessionAccess: () => ({ ok: true, value: session as StoredSession }),
+            emitAccessError: () => {
+                throw new Error('unexpected access error')
+            },
+            onAutoResumeSchedule: (sid, resetsAtMs, code) => calls.push({ sid, resetsAtMs, code })
+        })
+
+        socket.trigger('message', { sid: session.id, message: syntheticContent(QUOTA_TEXT) })
+
+        expect(calls).toHaveLength(1)
+        expect(calls[0].sid).toBe(session.id)
+        expect(calls[0].code).toBe('1308')
+        expect(new Date(calls[0].resetsAtMs).getHours()).toBe(16)
+        // The synthetic message itself is still persisted (hook does not block ingress).
+        expect(store.messages.getMessages(session.id)).toHaveLength(1)
+    })
+
+    it('does NOT invoke onAutoResumeSchedule for agent-authored discussion (real model name)', () => {
+        const calls: Array<{ sid: string; resetsAtMs: number; code: string }> = []
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('auto-resume-negative', {}, null, 'default')
+        const socket = new FakeSocket()
+        registerSessionHandlers(socket as unknown as CliSocketWithData, {
+            store,
+            resolveSessionAccess: () => ({ ok: true, value: session as StoredSession }),
+            emitAccessError: () => {
+                throw new Error('unexpected access error')
+            },
+            onAutoResumeSchedule: (sid, resetsAtMs, code) => calls.push({ sid, resetsAtMs, code })
+        })
+
+        socket.trigger('message', { sid: session.id, message: syntheticContent(QUOTA_TEXT, 'glm-5.2') })
+
+        expect(calls).toHaveLength(0)
+        expect(store.messages.getMessages(session.id)).toHaveLength(1)
+    })
+
+    it('does NOT invoke onAutoResumeSchedule for transient errors without a reset time', () => {
+        const calls: Array<{ sid: string; resetsAtMs: number; code: string }> = []
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('auto-resume-transient', {}, null, 'default')
+        const socket = new FakeSocket()
+        registerSessionHandlers(socket as unknown as CliSocketWithData, {
+            store,
+            resolveSessionAccess: () => ({ ok: true, value: session as StoredSession }),
+            emitAccessError: () => {
+                throw new Error('unexpected access error')
+            },
+            onAutoResumeSchedule: (sid, resetsAtMs, code) => calls.push({ sid, resetsAtMs, code })
+        })
+
+        socket.trigger('message', { sid: session.id, message: syntheticContent('[1302]请您控制请求频率') })
+
+        expect(calls).toHaveLength(0)
+    })
+
+    it('never throws on malformed content (hook is isolated from main persistence)', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('auto-resume-malformed', {}, null, 'default')
+        const socket = new FakeSocket()
+        registerSessionHandlers(socket as unknown as CliSocketWithData, {
+            store,
+            resolveSessionAccess: () => ({ ok: true, value: session as StoredSession }),
+            emitAccessError: () => {
+                throw new Error('unexpected access error')
+            },
+            onAutoResumeSchedule: () => {
+                throw new Error('should not be called for malformed content')
+            }
+        })
+
+        // Valid message shell, but inner data.message missing — must not throw,
+        // must persist the row, must not schedule.
+        expect(() =>
+            socket.trigger('message', {
+                sid: session.id,
+                message: { role: 'agent', content: { type: 'output', data: {} } }
+            })
+        ).not.toThrow()
+        expect(store.messages.getMessages(session.id)).toHaveLength(1)
+    })
+
+    it('survives a throwing onAutoResumeSchedule callback (main flow unaffected)', () => {
+        const store = new Store(':memory:')
+        const session = store.sessions.getOrCreateSession('auto-resume-throw', {}, null, 'default')
+        const socket = new FakeSocket()
+        registerSessionHandlers(socket as unknown as CliSocketWithData, {
+            store,
+            resolveSessionAccess: () => ({ ok: true, value: session as StoredSession }),
+            emitAccessError: () => {
+                throw new Error('unexpected access error')
+            },
+            onAutoResumeSchedule: () => {
+                throw new Error('boom')
+            }
+        })
+
+        expect(() =>
+            socket.trigger('message', { sid: session.id, message: syntheticContent(QUOTA_TEXT) })
+        ).not.toThrow()
+        // Synthetic row still persisted + broadcast despite the callback throwing.
+        expect(store.messages.getMessages(session.id)).toHaveLength(1)
+        expect(socket.roomEvents.some((e) => e.event === 'update')).toBe(true)
+    })
+})
+
 describe('cli session handlers', () => {
     it('drops redundant goal status events before persistence and broadcast', () => {
         const store = new Store(':memory:')
