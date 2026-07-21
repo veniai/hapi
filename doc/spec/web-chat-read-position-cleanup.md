@@ -3,7 +3,7 @@
 > 项目：`veniai/hapi` fork
 > 基线：`work/current`，commit `5ffc151`（revert）之后
 > 关系：不取代 `web-chat-read-position-sync.md` 的产品契约（§1–§13 仍有效）；本 spec **重写其 §14 实现状态**、**降级其 §3.2.5 跨端语义**、**定义清理方案**。两者冲突时以本 spec 为准。
-> 状态：spec 定稿；代码清理待执行（见 §4）。**§9 为待批提案，不在本次执行范围。**
+> 状态：**cleanup 已执行 + 部署 live**（阶段 0-5，commit `d3aabb3`→`55af75a`；migration v12→v13 于 2026-07-21 上 live，`user_version` 13，`attention_rev`/`handled_rev` 存活，公网 200，DB snapshot `~/.hapi/hapi.db.pre-v13-cleanup-1784597825058` 备用未用）。**§9 anchor 待批提案，未实施。**
 
 ---
 
