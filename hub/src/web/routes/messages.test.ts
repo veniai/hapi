@@ -21,10 +21,24 @@ import { createMessagesRoutes } from './messages'
 function createApp(opts: {
     active?: boolean
     sendMessage?: (sessionId: string, payload: unknown) => Promise<void>
+    getQueuedState?: (sessionId: string, localIds: string[]) => {
+        queuedLocalIds: string[]
+        invokedLocalMessages: Array<{ localId: string; invokedAt: number }>
+    }
 }) {
     const sentMessages: Array<{ sessionId: string; payload: unknown }> = []
+    const queuedStateCalls: Array<{ sessionId: string; localIds: string[] }> = []
     const sendMessage = opts.sendMessage ?? (async (sessionId: string, payload: unknown) => {
         sentMessages.push({ sessionId, payload })
+    })
+    const getQueuedState = opts.getQueuedState ?? ((sessionId: string, localIds: string[]) => {
+        queuedStateCalls.push({ sessionId, localIds })
+        return {
+            queuedLocalIds: localIds.filter((localId) => localId.startsWith('queued-')),
+            invokedLocalMessages: localIds
+                .filter((localId) => localId.startsWith('invoked-'))
+                .map((localId) => ({ localId, invokedAt: 1_000 }))
+        }
     })
 
     const engine = {
@@ -34,6 +48,7 @@ function createApp(opts: {
             session: { id: 'session-1', active: opts.active !== false }
         }),
         sendMessage,
+        getQueuedState,
         cancelQueuedMessage: async () => ({ status: 'cancelled' }),
         getMessagesPage: () => ({ messages: [], page: {} }),
     } as unknown as SyncEngine
@@ -45,7 +60,7 @@ function createApp(opts: {
     })
     app.route('/api', createMessagesRoutes(() => engine as SyncEngine))
 
-    return { app, sentMessages }
+    return { app, sentMessages, queuedStateCalls }
 }
 
 // ---------------------------------------------------------------------------
