@@ -47,12 +47,6 @@ test.describe('read-position refresh', () => {
         })
         await page.waitForTimeout(1500)
         const before = await readFirstVisible(page)
-        const saved = await page.evaluate(
-            (sid) => localStorage.getItem(`hapi.chat-scroll.v2.${sid}`),
-            sessionId,
-        )
-        console.log('[e2e] BEFORE:', JSON.stringify(before))
-        console.log('[e2e] saved:', saved)
         test.skip(!before.first, 'no visible message')
 
         // clear SW + cache so reload picks up the freshly deployed dist
@@ -72,7 +66,6 @@ test.describe('read-position refresh', () => {
         await page.waitForSelector('.happy-thread-messages > [id]', { timeout: 30_000 })
         await page.waitForTimeout(9000)
         const after = await readFirstVisible(page)
-        console.log('[e2e] AFTER :', JSON.stringify(after))
 
         expect(after.first, 'reload should land back on the same first-visible message').toBe(before.first)
     })
