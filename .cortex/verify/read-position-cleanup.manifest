@@ -1,0 +1,24 @@
+task=read-position-cleanup
+# 完成判据：cleanup spec §4 阶段 0–5 本地清理完成。人审冻结于 Goal Contract 批准时。
+# 跑法：VERIFY_TIMEOUT=900 cortex verify read-position-cleanup（根目录，worktree 须干净）
+
+[cond:typecheck]
+executable=bun
+args=typecheck
+expected_exit=0
+
+[cond:test]
+executable=bun
+args=run test
+expected_exit=0
+
+[cond:build-web]
+executable=bun
+args=run build:web
+expected_exit=0
+
+[cond:browser-checks]
+type=mcp
+target=playwright
+behavior=spec §7 六项：①进看过的 session 滚中间→切走→切回→落回离开位置（Router）②清 sessionStorage→刷新→进 session→落底 ③首次进新 session→落底 ④发消息→滚到刚发出 ⑤滚顶 loadOlder/滚底 fetchNewer→视口不跳 ⑥红点 G1 回归（另一 tab attention 亮→发送灭）
+pass_criteria=六项全部通过
