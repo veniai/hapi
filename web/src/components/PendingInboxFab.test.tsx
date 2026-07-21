@@ -42,8 +42,6 @@ function makeSession(overrides: Partial<SessionSummary> & { id: string }): Sessi
         nextScheduledAt: null,
         model: null,
         effort: null,
-        lastReadMessageId: null,
-        lastReadAt: null,
         attentionRev: 0,
         handledRev: 0,
         ...overrides

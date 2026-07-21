@@ -28,8 +28,6 @@ function makeExport(messages: HapiSessionExport['messages']): HapiSessionExport 
             model: null,
             modelReasoningEffort: null,
             effort: null,
-        lastReadMessageId: null,
-        lastReadAt: null,
         attentionRev: 0,
         handledRev: 0,
             serviceTier: null,

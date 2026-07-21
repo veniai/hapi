@@ -152,8 +152,6 @@ type DbSessionRow = {
     active: number
     active_at: number | null
     seq: number
-    last_read_message_id: string | null
-    last_read_at: number | null
     attention_rev: number
     handled_rev: number
 }
@@ -181,8 +179,6 @@ function toStoredSession(row: DbSessionRow): StoredSession {
         active: row.active === 1,
         activeAt: row.active_at,
         seq: row.seq,
-        lastReadMessageId: row.last_read_message_id,
-        lastReadAt: row.last_read_at,
         attentionRev: row.attention_rev,
         handledRev: row.handled_rev
     }

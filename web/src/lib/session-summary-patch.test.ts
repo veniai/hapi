@@ -9,7 +9,7 @@ function makeSummary(overrides: Partial<SessionSummary> & { id: string }): Sessi
         metadata: null, todoProgress: null, pendingRequestsCount: 0,
         pendingRequestKinds: [], pendingRequests: [], backgroundTaskCount: 0,
         futureScheduledMessageCount: 0, nextScheduledAt: null, model: null, effort: null,
-        lastReadMessageId: null, lastReadAt: null, attentionRev: 0, handledRev: 0,
+        attentionRev: 0, handledRev: 0,
         ...overrides
     }
 }

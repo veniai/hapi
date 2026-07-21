@@ -61,8 +61,6 @@ export type SessionSummary = {
     nextScheduledAt: number | null
     model: string | null
     effort: string | null
-    lastReadMessageId: string | null
-    lastReadAt: number | null
     attentionRev: number
     handledRev: number
 }
@@ -153,8 +151,6 @@ export function toSessionSummary(session: Session): SessionSummary {
         nextScheduledAt: null,
         model: session.model,
         effort: session.effort,
-        lastReadMessageId: session.lastReadMessageId ?? null,
-        lastReadAt: session.lastReadAt ?? null,
         attentionRev: session.attentionRev ?? 0,
         handledRev: session.handledRev ?? 0
     }

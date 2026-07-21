@@ -171,8 +171,6 @@ export class SessionCache {
             serviceTier: stored.serviceTier,
             permissionMode: existing?.permissionMode ?? metadata?.preferredPermissionMode,
             collaborationMode: existing?.collaborationMode,
-            lastReadMessageId: stored.lastReadMessageId,
-            lastReadAt: stored.lastReadAt,
             attentionRev: stored.attentionRev,
             handledRev: stored.handledRev,
             lastAttentionMessageId: stored.attentionRev > stored.handledRev
