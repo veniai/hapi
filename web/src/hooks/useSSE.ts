@@ -14,7 +14,7 @@ import type {
     SyncEvent
 } from '@/types/api'
 import { queryKeys } from '@/lib/query-keys'
-import { clearMessageWindow, getMessageWindowState, ingestIncomingMessages, markMessagesConsumed, removeOptimisticMessage, updateMessageStatus } from '@/lib/message-window-store'
+import { clearMessageWindow, hasMessageWindow, ingestIncomingMessages, markMessagesConsumed, removeOptimisticMessage } from '@/lib/message-window-store'
 
 type SSESubscription = {
     all?: boolean
@@ -448,8 +448,19 @@ export function useSSE(options: {
             }
 
             if (scope === 'global' && MESSAGE_STREAM_EVENT_TYPES.has(event.type)) {
-                if (event.type === 'message-received' && event.message.scheduledAt != null) {
-                    queueSessionListInvalidation()
+                if (event.type === 'message-received') {
+                    if (event.message.scheduledAt != null) {
+                        queueSessionListInvalidation()
+                    }
+                    // Feed the live window of any session the user has opened this page
+                    // session — including scheduled/queued messages (→ QueuedMessagesBar)
+                    // — so switching back is instant. Gated on hasMessageWindow to avoid
+                    // creating/persisting windows for sessions never opened (those still
+                    // fetchLatest on first entry). Mirrors the old session-scoped stream,
+                    // which ingested every message-received unconditionally.
+                    if (hasMessageWindow(event.sessionId)) {
+                        ingestIncomingMessages(event.sessionId, [event.message])
+                    }
                 }
                 if (
                     event.type === 'message-cancelled'
@@ -458,10 +469,10 @@ export function useSSE(options: {
                 ) {
                     queueSessionListInvalidation()
                 }
-                // The global `all` subscription also receives message-stream events.
-                // Session-scoped SSE normally drives the message window, but during
-                // reconnect gaps or while another session is selected, only the global
-                // connection may be alive — still clear the queued bar / optimistic rows.
+                // The global `all` subscription receives message-stream events for every
+                // session. Ingest opened windows above so cross-session switching stays
+                // live; also clear queued bar / optimistic rows regardless of which
+                // session is currently selected.
                 if (event.type === 'messages-consumed') {
                     markMessagesConsumed(event.sessionId, event.localIds, event.invokedAt)
                 }

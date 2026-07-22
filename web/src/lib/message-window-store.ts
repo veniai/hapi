@@ -83,6 +83,12 @@ const listeners = new Map<string, Set<() => void>>()
 const pendingVisibilityCacheBySession = new Map<string, Map<string, PendingVisibilityCacheEntry>>()
 const latestLoads = new Map<string, Promise<void>>()
 
+/** Whether an in-memory message window exists for this session (no create / hydrate). Used to gate
+ *  global-SSE ingest so we only feed windows the user has actually opened this page session. */
+export function hasMessageWindow(sessionId: string): boolean {
+    return states.has(sessionId)
+}
+
 // Throttled notification: coalesce rapid state updates into at most one
 // notification per NOTIFY_THROTTLE_MS during streaming. This prevents
 // Windows UI jank caused by excessive React re-renders during SSE streaming.

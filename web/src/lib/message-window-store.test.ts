@@ -11,6 +11,7 @@ import {
     fetchOlderMessages,
     getQueuedReconcileCandidateLocalIds,
     getMessageWindowState,
+    hasMessageWindow,
     ingestIncomingMessages,
     markMessagesConsumed,
     reconcileQueuedAgainstLatest,
@@ -893,6 +894,36 @@ describe('message-window-store visible trimming', () => {
         const ids = [...state.messages, ...state.pending].map((m) => m.id)
         expect(ids).not.toContain('ghost-server-id') // queued at fetch start + absent -> dropped
         expect(ids).toContain('fresh-server-id')      // arrived mid-fetch -> kept
+    })
+})
+
+describe('hasMessageWindow', () => {
+    it('returns false for a session that was never opened', () => {
+        expect(hasMessageWindow('never-opened-session')).toBe(false)
+    })
+
+    it('returns true once a window is created by ingest', () => {
+        ingestIncomingMessages('has-window-session', [makeMsg({ id: 'm1' })])
+        expect(hasMessageWindow('has-window-session')).toBe(true)
+    })
+
+    it('still returns true after clearMessageWindow (entry reset in place, not removed from the Map)', () => {
+        ingestIncomingMessages('cleared-session', [makeMsg({ id: 'm2' })])
+        clearMessageWindow('cleared-session')
+        // clearMessageWindow resets the entry in place; it does not delete it, so the
+        // global-SSE ingest gate keeps feeding this session until gc drops the storage key.
+        expect(hasMessageWindow('cleared-session')).toBe(true)
+    })
+})
+
+describe('ingestIncomingMessages (global SSE path)', () => {
+    it('ingests scheduled (queued-for-future) messages, not just live ones', () => {
+        // Regression guard: the global SSE ingest must not exclude scheduled messages —
+        // they render in QueuedMessagesBar. The old session-scoped stream ingested every
+        // message-received unconditionally; the merged global path must do the same.
+        const scheduled = makeMsg({ id: 'sched-1', scheduledAt: 9_999_999_999_000 })
+        ingestIncomingMessages('sched-session', [scheduled])
+        expect(getMessageWindowState('sched-session').messages.map((m) => m.id)).toContain('sched-1')
     })
 })
 
