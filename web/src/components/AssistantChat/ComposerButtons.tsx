@@ -423,7 +423,7 @@ export function UnifiedButton(props: {
             disabled={isDisabled}
             aria-label={ariaLabel}
             title={ariaLabel}
-            className={`flex h-[50px] w-[50px] shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
+            className={`flex h-10 w-10 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
         >
             {icon}
         </button>
