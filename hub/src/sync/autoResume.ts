@@ -98,17 +98,20 @@ export function classifySyntheticError(content: unknown): SyntheticError | null 
     return null
 }
 
-/** Quota recovery prompt (scheduled at the reset time). */
+/** Quota recovery prompt (scheduled after the reset time + buffer). */
 export const QUOTA_RESUME_PROMPT =
     '（系统自动恢复：API 5 小时限额已重置）临时中断，继续刚才的任务：' +
-    '有 skill 必须调 Skill tool 并严格按 skill 流程执行（不得 inline 替代）；' +
     '单步过长可拆分但不跳过；已完成不重做。'
 
 /** Rate recovery prompt (scheduled after a backoff delay). */
 export const RATE_RESUME_PROMPT =
     '（系统自动恢复：API 速率限制，已退避等待）临时中断，继续刚才的任务：' +
-    '有 skill 必须调 Skill tool 并严格按 skill 流程执行（不得 inline 替代）；' +
     '单步过长可拆分但不跳过；已完成不重做。'
+
+/** Buffer added to the [1308] quota reset time when scheduling recovery. The
+ *  reset time is when GLM lifts the quota; sending at exactly that moment races
+ *  the limit still being in effect → resume would fail. User-tuned to 60s. */
+export const QUOTA_RESET_BUFFER_MS = 60_000
 
 // --- [1302] rate backoff (spec §6.5) ---
 
