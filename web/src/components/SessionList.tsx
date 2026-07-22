@@ -195,6 +195,15 @@ export function getNextSessionVisibleCount(current: number, step: number, total:
     return Math.min(current + Math.max(1, step), total)
 }
 
+export function sortSessionsWithinProject(sessions: SessionSummary[]): SessionSummary[] {
+    return [...sessions].sort((a, b) => {
+        const archivedA = a.metadata?.lifecycleState === 'archived'
+        const archivedB = b.metadata?.lifecycleState === 'archived'
+        if (archivedA !== archivedB) return archivedA ? 1 : -1
+        return b.createdAt - a.createdAt
+    })
+}
+
 function groupSessionsByDirectory(sessions: SessionSummary[]): SessionGroup[] {
     const groups = new Map<string, { directory: string; machineId: string | null; sessions: SessionSummary[] }>()
 
@@ -214,7 +223,7 @@ function groupSessionsByDirectory(sessions: SessionSummary[]): SessionGroup[] {
 
     return Array.from(groups.entries())
         .map(([key, group]) => {
-            const sortedSessions = [...group.sessions].sort((a, b) => b.createdAt - a.createdAt)
+            const sortedSessions = sortSessionsWithinProject(group.sessions)
             const latestCreatedAt = group.sessions.reduce(
                 (max, s) => (s.createdAt > max ? s.createdAt : max),
                 -Infinity

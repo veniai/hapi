@@ -11,6 +11,7 @@ import {
     isSidebarEmptySessionStub,
     normalizeSearch,
     prepareSidebarSessions,
+    sortSessionsWithinProject,
     sessionMatchesQuery,
     shouldShowSessionInSidebar
 } from './SessionList'
@@ -262,6 +263,24 @@ describe('prepareSidebarSessions', () => {
 
         const result = prepareSidebarSessions(sessions)
         expect(result.map(session => session.id)).toEqual(['newer'])
+    })
+})
+
+describe('sortSessionsWithinProject', () => {
+    it('places archived sessions last while keeping creation order within each state', () => {
+        const sessions = [
+            makeSession({ id: 'archived-new', createdAt: 400, metadata: { path: '/work/hapi', lifecycleState: 'archived' } }),
+            makeSession({ id: 'active-old', createdAt: 100, metadata: { path: '/work/hapi' } }),
+            makeSession({ id: 'active-new', createdAt: 300, metadata: { path: '/work/hapi' } }),
+            makeSession({ id: 'archived-old', createdAt: 200, metadata: { path: '/work/hapi', lifecycleState: 'archived' } })
+        ]
+
+        expect(sortSessionsWithinProject(sessions).map(session => session.id)).toEqual([
+            'active-new',
+            'active-old',
+            'archived-new',
+            'archived-old'
+        ])
     })
 })
 
