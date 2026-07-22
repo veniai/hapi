@@ -46,6 +46,22 @@ const RECONNECT_MAX_DELAY_MS = 30_000
 const RECONNECT_JITTER_MS = 500
 const INVALIDATION_BATCH_MS = 16
 
+/**
+ * Reconnect delay for a given attempt + reason. Visibility recovery skips the
+ * first-attempt backoff so the user doesn't wait ~1-1.5s after unlocking the
+ * phone — reconnect fires immediately on `attempt === 0`, then falls back to
+ * exponential backoff (with jitter) on failure or for all other reasons
+ * (error / heartbeat-timeout, which must keep backing off).
+ */
+export function computeReconnectDelay(attempt: number, reason: string): number {
+    if (reason === 'visibility-recovery' && attempt === 0) {
+        return 0
+    }
+    const exponentialDelay = Math.min(RECONNECT_MAX_DELAY_MS, RECONNECT_BASE_DELAY_MS * (2 ** attempt))
+    const jitter = Math.floor(Math.random() * (RECONNECT_JITTER_MS + 1))
+    return exponentialDelay + jitter
+}
+
 function sortSessionSummaries(left: SessionSummary, right: SessionSummary): number {
     // L1.2：纯创建时间降序（去 active/pending 优先；会话更新不再跳顶）
     return right.createdAt - left.createdAt
@@ -198,10 +214,8 @@ export function useSSE(options: {
         eventSourceRef.current = eventSource
         lastActivityAtRef.current = Date.now()
 
-        const scheduleReconnect = () => {
+        const scheduleReconnect = (reason: string) => {
             const attempt = reconnectAttemptRef.current
-            const exponentialDelay = Math.min(RECONNECT_MAX_DELAY_MS, RECONNECT_BASE_DELAY_MS * (2 ** attempt))
-            const jitter = Math.floor(Math.random() * (RECONNECT_JITTER_MS + 1))
             reconnectAttemptRef.current = attempt + 1
             if (reconnectTimerRef.current) {
                 clearTimeout(reconnectTimerRef.current)
@@ -209,7 +223,7 @@ export function useSSE(options: {
             reconnectTimerRef.current = setTimeout(() => {
                 reconnectTimerRef.current = null
                 setReconnectNonce((value) => value + 1)
-            }, exponentialDelay + jitter)
+            }, computeReconnectDelay(attempt, reason))
         }
 
         const notifyDisconnect = (reason: string) => {
@@ -231,7 +245,7 @@ export function useSSE(options: {
                 eventSourceRef.current = null
             }
             setSubscriptionId(null)
-            scheduleReconnect()
+            scheduleReconnect(reason)
         }
 
         const flushInvalidations = () => {
@@ -583,7 +597,9 @@ export function useSSE(options: {
             if (getVisibilityState() !== 'visible') return
             if (eventSourceRef.current !== eventSource) return
             if (Date.now() - lastActivityAtRef.current >= HEARTBEAT_STALE_MS) {
-                // L0.3：亮屏立即重连并重置退避，不等锁屏期间累积的 backoff。
+                // L0.3：亮屏重置 attempt=0 并立即重连（computeReconnectDelay 对
+                // visibility-recovery + attempt 0 返回 0），不等锁屏期间累积的
+                // backoff；首次失败后 attempt=1 恢复指数退避。
                 reconnectAttemptRef.current = 0
                 requestReconnect('visibility-recovery')
             }
