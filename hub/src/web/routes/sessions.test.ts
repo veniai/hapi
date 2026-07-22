@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import { Hono } from 'hono'
-import type { Session, SyncEngine } from '../../sync/syncEngine'
+import { WorktreeArchiveBlockedError, type Session, type SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { createSessionsRoutes } from './sessions'
 
@@ -65,6 +65,8 @@ function createApp(session: Session, opts?: {
     getSessionExport?: (sessionId: string, session: Session) => unknown
     sessionExists?: boolean
     archiveSession?: (sessionId: string) => Promise<void>
+    archiveWorktreeSession?: (sessionId: string) => Promise<void>
+    deleteSession?: (sessionId: string) => Promise<void>
     getCursorChatStoreStatus?: SyncEngine['getCursorChatStoreStatus']
 }) {
     const applySessionConfigCalls: Array<[string, Record<string, unknown>]> = []
@@ -125,6 +127,7 @@ function createApp(session: Session, opts?: {
     }))
     const sessionExists = opts?.sessionExists !== false
     const archiveSessionMock = opts?.archiveSession ?? (async () => {})
+    const archiveWorktreeSessionMock = opts?.archiveWorktreeSession ?? (async () => {})
     const engine = {
         resolveSessionAccess: () => sessionExists
             ? { ok: true, sessionId: session.id, session }
@@ -143,6 +146,8 @@ function createApp(session: Session, opts?: {
             status: { onDisk: true, store: 'acp' as const }
         })),
         archiveSession: archiveSessionMock,
+        archiveWorktreeSession: archiveWorktreeSessionMock,
+        deleteSession: opts?.deleteSession ?? (async () => {}),
         getSessionExport: opts?.getSessionExport ?? (() => ({
             type: 'success',
             payload: {
@@ -1169,6 +1174,41 @@ describe('sessions routes', () => {
             expect(calls).toEqual(['session-1'])
         })
 
+        it('uses the worktree archive flow and exposes a structured blocker', async () => {
+            const session = createSession({
+                metadata: {
+                    path: '/tmp/project-worktree',
+                    host: 'localhost',
+                    flavor: 'codex',
+                    worktree: {
+                        basePath: '/tmp/project',
+                        worktreePath: '/tmp/project-worktree',
+                        branch: 'hapi-test',
+                        name: 'test',
+                        managedByHapi: true,
+                        baseRef: 'main',
+                        baseCommit: 'abc123'
+                    }
+                }
+            })
+            let normalArchiveCalled = false
+            const { app } = createApp(session, {
+                archiveSession: async () => { normalArchiveCalled = true },
+                archiveWorktreeSession: async () => {
+                    throw new WorktreeArchiveBlockedError('dirty_worktree', 'Worktree has uncommitted changes.')
+                }
+            })
+
+            const response = await app.request('/api/sessions/session-1/archive', { method: 'POST' })
+
+            expect(response.status).toBe(409)
+            expect(await response.json()).toEqual({
+                error: 'Worktree has uncommitted changes.',
+                code: 'dirty_worktree'
+            })
+            expect(normalArchiveCalled).toBe(false)
+        })
+
         it('returns 2xx and skips archiveSession when the row is already archived (idempotent)', async () => {
             let called = false
             const session = createSession({
@@ -1268,6 +1308,21 @@ describe('sessions routes', () => {
             expect(response.status).toBe(200)
             expect(await response.json()).toEqual({ ok: true })
             expect(calls).toEqual(['session-1'])
+        })
+    })
+
+    describe('DELETE /sessions/:id', () => {
+        it('refuses an inactive session that was not successfully archived', async () => {
+            const session = createSession({ active: false })
+            let deleted = false
+            const { app } = createApp(session, {
+                deleteSession: async () => { deleted = true }
+            })
+
+            const response = await app.request('/api/sessions/session-1', { method: 'DELETE' })
+
+            expect(response.status).toBe(409)
+            expect(deleted).toBe(false)
         })
     })
 

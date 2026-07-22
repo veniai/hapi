@@ -22,6 +22,7 @@ interface KillSessionResponse {
 export interface KillSessionLifecycle {
     cleanupAndExit: () => Promise<void>;
     setArchiveReason?: (reason: string) => void;
+    beginWorktreeArchive?: () => void;
 }
 
 export function registerKillSessionHandler(
@@ -52,4 +53,15 @@ export function registerKillSessionHandler(
             message: 'Killing hapi CLI process'
         };
     });
+
+    rpcHandlerManager.registerHandler<KillSessionRequest, KillSessionResponse>(RPC_METHODS.PrepareWorktreeArchive, async () => {
+        if (!lifecycle.beginWorktreeArchive) {
+            throw new Error('This session cannot prepare a worktree archive')
+        }
+        lifecycle.beginWorktreeArchive()
+        return {
+            success: true,
+            message: 'Preparing worktree archive'
+        }
+    })
 }

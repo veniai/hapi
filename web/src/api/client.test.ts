@@ -57,6 +57,18 @@ describe('ApiClient error mapping', () => {
         }
     })
 
+    it('surfaces an archive blocker message directly to the confirmation dialog', async () => {
+        fetchMock.mockResolvedValueOnce(
+            new Response(
+                JSON.stringify({ error: 'Worktree has uncommitted changes.', code: 'dirty_worktree' }),
+                { status: 409, statusText: 'Conflict' }
+            )
+        )
+
+        const api = new ApiClient('test-token')
+        await expect(api.archiveSession('session-X')).rejects.toThrow('Worktree has uncommitted changes.')
+    })
+
     it('passes the 422 missing-metadata body through unchanged so the UI can show the missing fields', async () => {
         fetchMock.mockResolvedValueOnce(
             new Response(

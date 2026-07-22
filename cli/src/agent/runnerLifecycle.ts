@@ -17,6 +17,7 @@ export type RunnerLifecycle = {
     setSessionEndReason: (reason: SessionEndReason) => void
     hasExplicitSessionEndReason: () => boolean
     markCrash: (error: unknown) => void
+    beginWorktreeArchive: () => void
     cleanup: () => Promise<void>
     cleanupAndExit: (codeOverride?: number) => Promise<void>
     registerProcessHandlers: () => void
@@ -47,19 +48,22 @@ export function createRunnerLifecycle(options: RunnerLifecycleOptions): RunnerLi
     let archiveReason = 'Hub restart'
     let sessionEndReason: SessionEndReason = 'terminated'
     let sessionEndReasonExplicit = false
+    let archiveOnCleanup = true
     let cleanupStarted = false
     let cleanupPromise: Promise<void> | null = null
 
     const logPrefix = `[${options.logTag}]`
 
     const archiveAndClose = async () => {
-        options.session.updateMetadata((currentMetadata) => ({
-            ...currentMetadata,
-            lifecycleState: 'archived',
-            lifecycleStateSince: Date.now(),
-            archivedBy: 'cli',
-            archiveReason
-        }))
+        if (archiveOnCleanup) {
+            options.session.updateMetadata((currentMetadata) => ({
+                ...currentMetadata,
+                lifecycleState: 'archived',
+                lifecycleStateSince: Date.now(),
+                archivedBy: 'cli',
+                archiveReason
+            }))
+        }
 
         options.session.sendSessionDeath(sessionEndReason)
         await options.session.flush({ timeoutMs: 1_000 })
@@ -141,6 +145,13 @@ export function createRunnerLifecycle(options: RunnerLifecycleOptions): RunnerLi
         sessionEndReason = 'error'
     }
 
+    const beginWorktreeArchive = () => {
+        // Hub marks the session archived only after the runner has removed
+        // the worktree and branch. We still send session-end before exit.
+        archiveOnCleanup = false
+        void cleanupAndExit()
+    }
+
     const registerProcessHandlers = () => {
         // tiann/hapi#914: SIGTERM is treated as the default reason ('Hub restart')
         // because the runner is restarted by systemd as part of hub restart in
@@ -175,6 +186,7 @@ export function createRunnerLifecycle(options: RunnerLifecycleOptions): RunnerLi
         setSessionEndReason,
         hasExplicitSessionEndReason,
         markCrash,
+        beginWorktreeArchive,
         cleanup,
         cleanupAndExit,
         registerProcessHandlers

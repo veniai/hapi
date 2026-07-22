@@ -1,164 +1,130 @@
-# 归档/删除 session 清理 worktree + 分支
+# 归档 Worktree Session 的安全清理
 
-> 状态：**方案（走查定稿，未实现）**。本文件描述完整版设计。
-> 痛点：归档/删除 session 不清 worktree + 分支 → stale 分支 / 孤儿 worktree 堆积。
+> 状态：**已实现，验证进行中**。本文是本次 `/goal` 的实现与验证依据；范围仅覆盖本地代码、测试和隔离浏览器验证，不部署，也不清理既有 worktree。
 
----
+## 1. 需求、边界与授权
 
-## 0. TL;DR
+### 1.1 目标
 
-- **痛点**：归档（archive）/删除（delete）一个 worktree session 后，它的 git worktree + 分支不清理，堆积成 stale 分支 / 孤儿 worktree（实测仓库已攒一堆 `hapi-*` 残留分支）。
-- **根因**：① worktree 信息（`{branch, worktreePath, basePath}`）只在 runner 内存（`run.ts` 局部），**没持久化到 session metadata**；② 归档只标 `lifecycleState=archived`（`syncEngine.archiveSession`），不碰 worktree；③ worktree 删除只在 session end（agent 进程退）时 runner 删（`git worktree remove`），**不删分支**。
-- **目标**：
-  - **归档** = 删 worktree + 删分支 + **留对话**（hub DB archived，可查）。
-  - **删除**（前置已归档、代码已删）= 删对话（DB）。
-  - 删 worktree 前**查 dirty**（未提交改动拦住，提示用户先处理，不裸丢工作）。
-- **方案（4 步）**：① 持久化 worktreeInfo 到 session metadata；② 加 `CleanupWorktree` RPC（dirty check + 删 worktree + 删分支）；③ 归档 endpoint 调 RPC（dirty 拦 + 删）；④ web UI 提示。
+对 HAPI 管理的 worktree session，用户点击「归档」时提供单一、可预期的结果：
 
----
+- **成功**：结束 session，删除该 Git worktree 和分支，保留已归档的对话。
+- **被阻止**：立即告知原因；不把 session 标为 archived，不删除 worktree 或分支。用户处理问题后可再次归档。
 
-## 1. 背景 / 痛点
+这解决 worktree 与 `hapi-*` 分支持续堆积的问题，同时不静默丢弃未提交或未合并的成果。
 
-HAPI worktree session（`sessionType: 'worktree'`）在隔离 git worktree 里跑 agent（分支 `hapi-<name>`）。用户「结束」一个 session 的两个动作：
-- **归档**：活儿干完了，收起来（留对话历史，可查）。
-- **删除**：彻底不要（连对话也删；UI 强制删除前必须先归档，所以走到删除时代码已被归档删干净）。
+### 1.2 用户可见规则
 
-现状：归档/删除**都不清 worktree + 分支** → 每结束一个 worktree session 就残留一套（worktree 目录可能在 session end 时删了，但 git 分支永远留）。实测仓库已攒一堆 `hapi-*` stale 分支 + 孤儿 worktree 注册。
+归档 worktree session 前，以下任一条件成立都必须阻止操作并弹出明确原因：
 
----
+1. 对应 runner / machine 不在线，无法在本机完成检查和清理。
+2. agent 仍在执行或存在后台任务，无法安全停止和检查。
+3. worktree 有 staged、unstaged 或 untracked 文件。
+4. 分支含有相对创建基线尚未合并的 commit。
+5. metadata、Git worktree 注册、路径或分支的归属无法相互验证。
+6. Git 检查、停止 session、删除 worktree 或删除分支任一步失败。
 
-## 2. 现状走查（亲验 + file:line）
+通过检查时，归档才会完成。系统不创建 `pending-cleanup`、不后台重试、也不把需要人工处理的本地成果隐藏为待办。
 
-### 2.1 worktree 信息只在 runner 内存，没持久化
+「删除 session」只能删除已经成功归档的对话记录；它不提供绕过上述检查来删除本地代码的路径。
 
-| 点 | 证据 | 现状 |
-|---|---|---|
-| WorktreeInfo 类型 | `cli/src/runner/worktree.ts:9-14` | `{ basePath, worktreePath, branch, name, createdAt }`，branch = `hapi-<name>`（:127） |
-| createWorktree | `worktree.ts:139` `git worktree add -b hapi-<name>` | runner spawn 时建 |
-| worktreeInfo 存储 | `cli/src/runner/run.ts:298` `let worktreeInfo: WorktreeInfo \| null = null` | 🔴 **局部变量，不上报 session metadata** |
-| session metadata worktree 字段 | grep `shared/src/types.ts`、`hub/src/store/sessions.ts` | 🔴 **无** — hub/session 不知道 worktree 在哪 / 分支名 |
+### 1.3 范围
 
-→ **归档时 hub 拿不到 worktree 信息**，任何「按 session 删 worktree」都缺信息。
+- 适用：由 HAPI 创建、metadata 与 Git 注册均可验证的 Git worktree session。
+- 不适用：普通 session；它们的归档行为保持不变。
+- Cursor 原生 worktree：仅在能以 Cursor/Git 元数据证明同一性时纳入；无法证明时作为 blocker，而不是猜测路径或分支。
+- 旧 session：缺少创建基线或归属信息时作为 blocker，要求用户手动处理，不对历史目录作批量推断或删除。
 
-### 2.2 归档只标 metadata，不碰 worktree
+### 1.4 权限与停点
 
-| 点 | 证据 | 现状 |
-|---|---|---|
-| archive endpoint | `hub/src/web/routes/sessions.ts:310` `POST /sessions/:id/archive` | 验 session → 调 `engine.archiveSession` |
-| archiveSession | `hub/src/sync/syncEngine.ts:579` | 设 `lifecycleState='archived'` + `active=false`；🔴 **不删 worktree/分支** |
+后续代码实现会引入受用户点击触发的本地 `git worktree remove` 与分支删除。这是破坏性动作，必须满足本 Spec 的全部检查，且不得使用 `--force`。不涉及数据库 migration、生产部署或现有 worktree 的自动清扫。
 
-### 2.3 worktree 删除只在 session end，且不删分支
+在用户手动触发 `/goal` 前，不开始代码实现。若执行中发现无法可靠判定分支是否已合并、无法验证 Cursor 原生 worktree 的归属，停止并请求产品决策，不放宽检查。
 
-| 点 | 证据 | 现状 |
-|---|---|---|
-| cleanupWorktree | `cli/src/runner/run.ts:362` | runner 内存 worktreeInfo，on child exit 调 |
-| 触发时机 | `run.ts:588` `happyProcess.once('exit', cleanupWorktree)` | 🔴 **只在 agent 进程退出时**（不是归档） |
-| removeWorktree | `cli/src/runner/worktree.ts:165` | `git worktree remove --force`；🔴 **不删 git 分支** |
+## 2. 调研发现
 
-→ session end 删了 worktree 目录，但**分支留着**（stale 分支来源）。
+### 2.1 已有信息与现状
 
-### 2.4 删除 endpoint（只删 DB，要求已 inactive）
+| 事实 | 证据 | 影响 |
+| --- | --- | --- |
+| `Metadata` 已有 `worktree` 字段 | `shared/src/schemas.ts` 的 `WorktreeMetadataSchema` | 原设计所称“metadata 无 worktree 字段”已过时；无需为此做 DB migration。 |
+| HAPI runner 创建 worktree 后通过环境变量传给 session；session 工厂会写入 metadata | `cli/src/runner/run.ts`、`cli/src/utils/worktreeEnv.ts`、`cli/src/agent/sessionFactory.ts` | 常规 HAPI worktree session 已具备基础关联信息。 |
+| Cursor ACP 也会写入 `metadata.worktree` | `cli/src/cursor/cursorAcpRemoteLauncher.ts` | 不能假设所有 worktree 都是同一创建器或都可按 `hapi-*` 规则删除。 |
+| 当前归档调用 `KillSession` 后立即标 session inactive | `hub/src/sync/syncEngine.ts` 的 `archiveSession` | 新流程不应在 agent 仍可能写目录时直接删除 worktree。 |
+| 当前正常 child exit 没有统一触发 worktree 清理；timeout 路径才注册清理 listener | `cli/src/runner/run.ts` | worktree 确实会残留；原 Spec 对“每次 session end 都会删除 worktree”的描述不准确。 |
+| 当前删除函数使用 `git worktree remove --force` | `cli/src/runner/worktree.ts` | 必须移除常规归档路径的强制删除，不能把 dirty check 只放在新 RPC 内。 |
+| 删除 API 仅检查 inactive，未验证 archived | `hub/src/web/routes/sessions.ts` | 后续必须使服务端也强制“先成功归档”。 |
 
-| 点 | 证据 | 现状 |
-|---|---|---|
-| delete endpoint | `sessions.ts:656` `DELETE /sessions/:id` | if active → 409「Cannot delete active session. Archive it first.」；else `engine.deleteSession` 删 DB |
-| 删 worktree? | — | 🔴 **不删**（只删 DB 记录） |
+本地只读抽样显示当前仓库有多个同级 worktree 与 `hapi-*` 分支；这证明积累现象存在，但分支数量本身不能区分仍在使用和 stale 的条目。
 
----
+### 2.2 关键安全判断
 
-## 3. 根因
+`git status --porcelain` 为空只说明没有未提交文件，**不代表分支没有未合并的提交**。因此“干净即 `git branch -D`”会删除已 commit 但未合并的成果，不符合目标。
 
-两个独立缺陷：
-1. **worktreeInfo 不持久化**：hub 不知道 session 的 worktree 在哪，任何「按 session 删 worktree」都缺信息。
-2. **清理不彻底**：即使删 worktree（session end），分支不删；归档/删除根本不触发清理。
+新建 worktree 必须记录创建时的基线 ref 和 commit。归档检查需要证明该 worktree 分支已被合并到该基线；无法证明即阻止，而不是根据当前默认分支或分支名前缀猜测。
 
----
+## 3. 设计契约
 
-## 4. 方案（完整版，4 步）
+### 3.1 归档事务
 
-### 4.1 持久化 worktreeInfo 到 session metadata（前提）
+归档 API 对用户表现为一次操作：成功才变为 archived，失败即时返回 blocker。内部必须按以下不变量组织：
 
-runner createWorktree 后，把 `{worktreePath, branch, basePath}` 上报到 session metadata（走现成 update-metadata，`cli/src/runner/run.ts` + `apiSession`）。hub 存 `session.metadata.worktree`。
+1. 先在 runner 所在机器做只读预检；预检失败不终止 session。
+2. 预检通过后停止 agent，并在其不再写入 worktree 后进行最终复检。
+3. 最终复检通过后，以非强制 Git 操作删除 worktree 与分支。
+4. 只有本地删除均确认成功，Hub 才将对话写为 archived。
 
-- session metadata 是 freeform JSON，加 `worktree` 子字段**不需 DB schema migration**（metadata 列是 JSON）。
-- `shared/src/types.ts` Session metadata 类型加 `worktree?: { worktreePath: string; branch: string; basePath: string }`（TS 类型）。
+最终复检是防竞态所必需的：agent 可能在首次预检后写入文件。若最终复检失败，返回 blocker，保留 worktree 与分支，并保持对话未归档；agent 已停止这一事实必须在 UI 错误信息中明确说明，用户处理后可重新归档。
 
-### 4.2 加 `CleanupWorktree` RPC（cli + hub）
+### 3.2 归属与合并证明
 
-**cli 侧**（registerHandler，照 `cli/src/api/apiMachine.ts` 模式）：
-- `RPC_METHODS.CleanupWorktree`：收 `{ worktreePath, branch, basePath }`。
-- 逻辑：
-  1. `git -C worktreePath status --porcelain` → 非空（dirty）→ 返回 `{ ok: false, dirty: true, files: [...] }`。
-  2. 干净 → `removeWorktree`（`git worktree remove`）+ `git branch -D branch`（删分支，改进）→ 返回 `{ ok: true }`。
+清理请求不得把来自 UI 或 metadata 的路径、分支名直接交给 Git 删除。runner 必须验证：
 
-**hub 侧**（`hub/src/sync/rpcGateway.ts`，照 `killSession:137` 模式）：
-- `cleanupWorktree(sessionId)`：读 `session.metadata.worktree` → `machineRpc` 调 cli `CleanupWorktree`。
+- `basePath` 是仓库根目录；
+- `worktreePath` 是该仓库当前注册的 worktree；
+- worktree 当前分支与 metadata 以及创建记录一致；
+- 创建记录中的基线 ref 仍可解析；
+- worktree 分支已可达于该基线 ref，因而没有该 session 独有的未合并 commit。
 
-### 4.3 归档 endpoint 改造（`sessions.ts:310` archive）
+任一验证失败都是 blocker。删除分支使用已验证的 Git ref，不用字符串拼接或 `hapi-*` 前缀作为授权依据。
 
-archive handler：
-1. if `session.metadata.worktree` 存在（worktree session）→ 调 `engine.cleanupWorktree(sessionId)`：
-   - dirty → 返回 409「worktree 有 N 个未提交改动，先处理」（**不归档**）。
-   - ok → worktree + 分支已删，继续。
-   - runner 离线（RPC 不可达）→ 见 §6.1 选项。
-2. `engine.archiveSession`（标 archived + active=false）。
+### 3.3 Blocker 响应
 
-### 4.4 删除 endpoint（`sessions.ts:656` delete）— 不变
+服务端返回稳定的结构化 blocker code 与人可读说明。至少涵盖：`machine_offline`、`session_busy`、`dirty_worktree`、`unmerged_commits`、`worktree_unverified`、`git_failure`、`stop_failure`。
 
-UI 强制「删除前必须先归档」，归档（4.3）已删 worktree + 分支，所以删除只删 DB 对话（现状 `deleteSession`）。**不改**。
+Web 将 blocker 显示为归档动作的直接错误，不把它当作网络异常，不乐观地从列表移除 session，也不显示“已归档”。
 
-### 4.5 web UI
+### 3.4 数据与兼容边界
 
-归档按钮点下去 → backend 返回 dirty 409 → 弹提示「这个 session 的 worktree 有未提交改动，先去处理（commit 或丢弃）再归档」。
+- worktree metadata 增加基线证明所需字段；这是 JSON metadata 的协议演进，不需要 SQLite schema migration。
+- 现有 metadata 缺少这些字段时不做兼容性猜测，返回 `worktree_unverified`。
+- Hub 的删除 endpoint 以 `metadata.lifecycleState === 'archived'` 为服务端前置条件。
 
----
+## 4. 拆解验证
 
-## 5. 改动清单
+每项均为可观察结果与检测方式，不以“已调用某函数”作为验收。
+对应的 Cortex 执行 manifest 为 `.cortex/verify/archive-cleanup-worktree.manifest`；在实现开始前经人审冻结，完成前由 `cortex verify archive-cleanup-worktree` 生成 receipt。
 
-| 文件 | 改动 |
-|---|---|
-| `cli/src/runner/run.ts` | createWorktree 后 update-metadata 上报 `{worktreePath, branch, basePath}` |
-| `cli/src/runner/worktree.ts` | 加 `cleanupWorktreeAndBranch`（git status dirty + removeWorktree + `git branch -D`） |
-| `cli/src/api/`（session/machine RPC 注册处） | register `RPC_METHODS.CleanupWorktree` handler |
-| `shared/src/socket.ts` + `types.ts` | 加 `CleanupWorktree` RPC method + 请求/响应类型 + Session metadata `worktree?` 字段 |
-| `hub/src/sync/rpcGateway.ts` | 加 `cleanupWorktree(sessionId)`（读 metadata.worktree → machineRpc） |
-| `hub/src/sync/syncEngine.ts` | 加 `cleanupWorktree`（调 rpcGateway） |
-| `hub/src/web/routes/sessions.ts:310` | archive handler：metadata.worktree 存在 → cleanupWorktree（dirty 拦 + 删）→ archiveSession |
-| `web/src/...` | 归档 dirty 409 响应 → 弹提示 |
+| 可观察结果 | 检测 | 是否进 CI |
+| --- | --- | --- |
+| 干净、已合并且归属正确的 HAPI worktree session 归档成功；对话为 archived，`git worktree list` 不含该路径，`git show-ref` 不含该分支 | CLI/Hub 集成测试使用临时 Git repo；路由级测试断言响应与持久化状态 | 是；相关 Vitest 用例随 `bun run test` 执行 |
+| 有 staged、unstaged 或 untracked 文件时，归档返回 `409 dirty_worktree`；session、目录、分支均未改变 | worktree helper 单测覆盖三类状态；Hub 路由测试 | 是 |
+| 有已提交但未合并的分支提交时，归档返回 `409 unmerged_commits`；即使 `git status` 干净也不删除分支 | 临时 Git repo 集成测试，断言分支与 commit 仍存在 | 是 |
+| 分支已合并到记录的基线时，允许清理；基线缺失、变为不可解析或无法证明合并时阻止 | Git helper 单测与临时 repo 集成测试 | 是 |
+| runner 离线、RPC 未注册或 socket 断开时，归档返回 `409 machine_offline`，不写 archived | `RpcTargetMissingError` 路由/engine 测试 | 是 |
+| metadata 路径、注册 worktree、当前分支三者不一致时，返回 `409 worktree_unverified`，不执行删除 Git 命令 | helper 单测；执行器 mock 断言无 remove/branch-delete 调用 | 是 |
+| agent 在首次预检后产生修改时，最终复检阻止归档；目录与分支仍在，响应说明 agent 已停止 | runner/Hub 协调测试，以受控 fake Git 状态模拟两次检查不同 | 是 |
+| `git worktree remove` 或分支删除失败时，Hub 不写 archived，错误可见且不使用 `--force` | 失败注入单测；命令参数断言 | 是 |
+| 普通 session 归档不触发任何 worktree RPC，原有归档行为保持 | Hub 路由测试 | 是 |
+| `DELETE /sessions/:id` 对 inactive 但未 archived 的 session 返回冲突；对成功 archived 的 session 才删除对话 | Hub 路由测试 | 是 |
+| Web 对每个 blocker 显示可行动的错误文案，且失败后 session 仍在当前列表状态 | Web 组件/Hook 测试 | 是 |
+| 全仓类型、单测和 web build 不回归 | `bun typecheck`、`bun run test`、`bun run build:web` | 是，现有 `.github/workflows/test.yml` 已覆盖 |
 
-**不改**：DB schema（metadata JSON 列）、删除 endpoint（仍删 DB）。
+实现完成后，除上述自动化证据外，进行一次隔离临时仓库的人审流程：分别制造干净已合并、dirty、untracked、未合并 commit、runner 离线五种状态，确认 UI 与 Git 最终状态符合本表。该人审不操作现有项目 worktree，不进入生产环境。
 
----
+## 5. 非目标
 
-## 6. 复杂点 / 待定选项
-
-### 6.1 runner 离线（machine 没连）怎么办
-
-归档时 RPC 发不到 runner → worktree 删不了。两选：
-- **a. 标「待清理」**（倾向）：归档照常（标 archived），worktree 记 pending-cleanup；runner 重连时补删。不阻塞用户归档。
-- **b. 拒绝归档**：409「机器离线，先连 runner 再归档」。
-
-### 6.2 dirty 检查边界
-
-- `git status --porcelain` 非空 = dirty。untracked 文件算（倾向，untracked 也是未提交）。
-- 拦住后用户怎么「处理」：进 worktree commit、或手动 discard。UI 提示 + 引导。
-
-### 6.3 非 worktree session（sessionType 非 worktree）
-
-非 worktree session（普通目录）归档不涉 worktree，跳过清理（现状不变）。
-
----
-
-## 7. 验证（实施时）
-
-- worktree session 归档 → worktree 删 + 分支删（`git branch` 无残留）+ 对话留（archived 可查）。
-- 归档时 worktree dirty → 409 + 提示（不删）。
-- 非 worktree session 归档 → 不变。
-- runner 离线归档 → 标 pending（6.1a）或拒（6.1b），待定。
-- 删除（已归档）→ 只删对话（代码已删）。
-
----
-
-## 8. 简化版（out of scope，对比）
-
-简化版只改 session end 的 `cleanupWorktree` 加 `git branch -D`（agent 退时连 worktree 带分支删）。不需持久化 / RPC / endpoint 改。但「end 时清」≠「归档时清」（归档时 agent 还活则删不了，得等它退）。本 spec 选完整版（归档即清），简化版作为 fallback / 第一步。
+- 不清理本功能实施前已经遗留的 worktree 或分支。
+- 不因归档自动 merge、rebase、commit、stash 或丢弃用户改动。
+- 不通过分支名前缀、目录命名规则或当前默认分支推断可删除性。
+- 不引入数据库 migration、后台 pending 队列或生产服务重启。

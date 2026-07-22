@@ -5,7 +5,8 @@ import {
     DecryptedMessageSchema,
     MachineSchema,
     PermissionModeSchema,
-    SessionSchema
+    SessionSchema,
+    WorktreeMetadataSchema
 } from './schemas'
 import { AgentFlavorSchema } from './modes'
 import type {
@@ -181,6 +182,46 @@ export type ListCodexSessionsRpcRequest = z.infer<typeof ListCodexSessionsRpcReq
 export type ListCodexSessionsRpcResponse = z.infer<typeof ListCodexSessionsRpcResponseSchema>
 export type ArchiveCodexSessionRpcRequest = z.infer<typeof ArchiveCodexSessionRpcRequestSchema>
 export type ArchiveCodexSessionRpcResponse = z.infer<typeof ArchiveCodexSessionRpcResponseSchema>
+
+export const WorktreeArchiveBlockerCodeSchema = z.enum([
+    'machine_offline',
+    'session_busy',
+    'dirty_worktree',
+    'unmerged_commits',
+    'worktree_unverified',
+    'git_failure',
+    'stop_failure'
+])
+
+export type WorktreeArchiveBlockerCode = z.infer<typeof WorktreeArchiveBlockerCodeSchema>
+
+export const WorktreeArchiveRequestSchema = WorktreeMetadataSchema.extend({
+    worktreePath: z.string().min(1),
+    managedByHapi: z.literal(true),
+    baseRef: z.string().min(1),
+    baseCommit: z.string().min(1),
+    hostPid: z.number().int().positive()
+})
+
+export type WorktreeArchiveRequest = z.infer<typeof WorktreeArchiveRequestSchema>
+
+export const WorktreeArchiveInspectionSchema = z.union([
+    z.object({ type: z.literal('ready') }),
+    z.object({
+        type: z.literal('blocker'),
+        code: WorktreeArchiveBlockerCodeSchema,
+        message: z.string()
+    })
+])
+
+export type WorktreeArchiveInspection = z.infer<typeof WorktreeArchiveInspectionSchema>
+
+export const WorktreeArchiveCleanupSchema = z.union([
+    z.object({ type: z.literal('success') }),
+    WorktreeArchiveInspectionSchema
+])
+
+export type WorktreeArchiveCleanup = z.infer<typeof WorktreeArchiveCleanupSchema>
 
 export const SessionCollaborationModeRequestSchema = z.object({
     mode: CodexCollaborationModeSchema
