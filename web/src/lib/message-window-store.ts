@@ -1351,6 +1351,24 @@ export function setAtBottom(sessionId: string, atBottom: boolean): void {
     }, true)
 }
 
+/**
+ * A restored chat viewport must keep its existing message window stable until
+ * the operator explicitly returns to the bottom. Otherwise an entry refresh
+ * may replace that window before scroll restoration has a chance to preserve
+ * the message being read.
+ */
+export function freezeMessageWindowForScrollRestoration(sessionId: string): boolean {
+    let frozen = false
+    updateState(sessionId, (prev) => {
+        if (!prev.atBottom || prev.messages.length === 0) {
+            return prev
+        }
+        frozen = true
+        return buildState(prev, { atBottom: false })
+    }, true)
+    return frozen
+}
+
 export function appendOptimisticMessage(sessionId: string, message: DecryptedMessage): void {
     updateState(sessionId, (prev) => {
         const merged = mergeMessages(prev.messages, [message])

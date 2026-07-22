@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
     Navigate,
@@ -10,6 +10,7 @@ import {
     useMatchRoute,
     useNavigate,
     useParams,
+    useRouter,
     useSearch,
 } from '@tanstack/react-router'
 import { getScrollRestorationKey } from '@/lib/scrollRestorationKey'
@@ -40,7 +41,12 @@ import { ApiError } from '@/api/client'
 import { queryKeys } from '@/lib/query-keys'
 import { useToast } from '@/lib/toast-context'
 import { useTranslation } from '@/lib/use-translation'
-import { fetchLatestMessages, gcMessageWindows, seedMessageWindowFromSession } from '@/lib/message-window-store'
+import {
+    fetchLatestMessages,
+    gcMessageWindows,
+    seedMessageWindowFromSession,
+} from '@/lib/message-window-store'
+import { freezeRestoredSessionMessageWindow } from '@/lib/sessionEntryScrollRestoration'
 import { clearDraftsAfterSend } from '@/lib/clearDraftsAfterSend'
 import { inactiveSessionCanResume } from '@/lib/sessionResume'
 import { markSessionSeen } from '@/lib/sessionLastSeen'
@@ -728,6 +734,7 @@ function SessionPage() {
     const { t } = useTranslation()
     const goBack = useAppGoBack()
     const navigate = useNavigate()
+    const router = useRouter({ warn: false })
     const queryClient = useQueryClient()
     const { addToast } = useToast()
     const { sessionId } = useParams({ from: '/sessions/$sessionId' })
@@ -760,9 +767,14 @@ function SessionPage() {
         fetchNewer: fetchNewerMessages,
     } = useMessages(api, sessionId)
 
-    // 回退到 spec 之前：进入 session 即落最新（useMessages 的 fetchLatest effect
-    // 负责）。阅读位置恢复由 TanStack Router scrollRestoration 负责（落底只是
-    // 无缓存时的兜底，HappyThread 内让位 Router 缓存）。红点 G1 保留。
+    // A return visit has both a Router scroll entry and an in-memory message
+    // window. Freeze the latter before useMessages' passive fetchLatest effect
+    // runs, so new data is staged as pending instead of replacing the window
+    // whose scroll position is being restored. Empty/cold windows remain on the
+    // normal latest-and-bottom path.
+    useLayoutEffect(() => {
+        freezeRestoredSessionMessageWindow(router, sessionId)
+    }, [router, sessionId])
 
     // Tracks the most recent send the hub rejected (4xx/5xx/network), keyed
     // by the session the failed POST actually targeted (post-resolveSessionId).
