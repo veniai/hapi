@@ -101,6 +101,21 @@ describe('worktree archive inspection', () => {
             .rejects.toThrow()
     })
 
+    it('force-removes a dirty, unmerged worktree only when explicitly requested', async () => {
+        const repo = await createRepository()
+        const request = await createArchiveRequest(repo, 'force-cleanup')
+        await writeFile(join(request.worktreePath, 'discarded.txt'), 'discarded\n')
+        await git(request.worktreePath, ['add', 'discarded.txt'])
+        await git(request.worktreePath, ['commit', '-m', 'unmerged'])
+        await writeFile(join(request.worktreePath, 'dirty.txt'), 'dirty\n')
+
+        await expect(cleanupWorktreeArchive({ ...request, force: true })).resolves.toEqual({ type: 'success' })
+        const worktrees = await execFileAsync('git', ['worktree', 'list', '--porcelain'], { cwd: repo })
+        expect(String(worktrees.stdout)).not.toContain(request.worktreePath)
+        await expect(execFileAsync('git', ['show-ref', '--verify', `refs/heads/${request.branch}`], { cwd: repo }))
+            .rejects.toThrow()
+    })
+
     it('blocks a request whose recorded branch is not the registered worktree branch', async () => {
         const repo = await createRepository()
         const request = await createArchiveRequest(repo, 'mismatch')

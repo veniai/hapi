@@ -4,7 +4,9 @@ import type { ApiClient } from '@/api/client'
 import { useLongPress } from '@/hooks/useLongPress'
 import { usePlatform } from '@/hooks/usePlatform'
 import { useSessionActions } from '@/hooks/mutations/useSessionActions'
+import { ArchiveBlockerError } from '@/api/client'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
+import { ArchiveBlockerDialog } from '@/components/ArchiveBlockerDialog'
 import { SessionExportDialog } from '@/components/SessionExportDialog'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
@@ -597,7 +599,8 @@ function SessionItem(props: {
     const [menuAnchorPoint, setMenuAnchorPoint] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
     const [renameOpen, setRenameOpen] = useState(false)
     const [exportOpen, setExportOpen] = useState(false)
-    const [archiveOpen, setArchiveOpen] = useState(false)
+    const [archiveBlocker, setArchiveBlocker] = useState<ArchiveBlockerError | null>(null)
+    const [archiveError, setArchiveError] = useState<string | null>(null)
     const [deleteOpen, setDeleteOpen] = useState(false)
     const {
         status: cursorChatStoreStatus,
@@ -622,6 +625,26 @@ function SessionItem(props: {
         s.metadata?.flavor ?? null
     )
     const [reopenError, setReopenError] = useState<string | null>(null)
+
+    const handleArchive = async (force = false) => {
+        try {
+            await archiveSession(force)
+            if (!force) {
+                setArchiveBlocker(null)
+                setArchiveError(null)
+            }
+        } catch (error) {
+            if (!force && error instanceof ArchiveBlockerError) {
+                setArchiveBlocker(error)
+                return
+            }
+            if (!force) {
+                setArchiveError(error instanceof Error ? error.message : t('dialog.error.default'))
+                return
+            }
+            throw error
+        }
+    }
 
     const handleReopen = async () => {
         setReopenError(null)
@@ -786,7 +809,7 @@ function SessionItem(props: {
                 sessionActive={s.active}
                 onRename={() => setRenameOpen(true)}
                 onExport={() => setExportOpen(true)}
-                onArchive={() => setArchiveOpen(true)}
+                onArchive={() => { void handleArchive() }}
                 onReopen={cursorReopenDisabledReason ? undefined : handleReopen}
                 reopenDisabledReason={cursorReopenDisabledReason}
                 onDelete={() => setDeleteOpen(true)}
@@ -823,16 +846,15 @@ function SessionItem(props: {
                 />
             ) : null}
 
-            <ConfirmDialog
-                isOpen={archiveOpen}
-                onClose={() => setArchiveOpen(false)}
-                title={t('dialog.archive.title')}
-                description={t('dialog.archive.description', { name: sessionName })}
-                confirmLabel={t('dialog.archive.confirm')}
-                confirmingLabel={t('dialog.archive.confirming')}
-                onConfirm={archiveSession}
+            <ArchiveBlockerDialog
+                blocker={archiveBlocker}
+                error={archiveError}
+                onClose={() => {
+                    setArchiveBlocker(null)
+                    setArchiveError(null)
+                }}
+                onConfirm={() => handleArchive(true)}
                 isPending={isPending}
-                destructive
             />
 
             <ConfirmDialog

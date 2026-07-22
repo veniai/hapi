@@ -124,6 +124,12 @@ export const ReopenSessionMissingMetadataResponseSchema = z.object({
 
 export type ReopenSessionMissingMetadataResponse = z.infer<typeof ReopenSessionMissingMetadataResponseSchema>
 
+export const ArchiveSessionRequestSchema = z.object({
+    force: z.boolean().optional().default(false)
+})
+
+export type ArchiveSessionRequest = z.infer<typeof ArchiveSessionRequestSchema>
+
 export const CursorChatStoreStatusSchema = z.object({
     onDisk: z.boolean(),
     store: z.enum(['legacy', 'acp']).nullable()
@@ -195,12 +201,18 @@ export const WorktreeArchiveBlockerCodeSchema = z.enum([
 
 export type WorktreeArchiveBlockerCode = z.infer<typeof WorktreeArchiveBlockerCodeSchema>
 
+export const WorktreeArchiveForceModeSchema = z.enum(['cleanup', 'archive-only'])
+export type WorktreeArchiveForceMode = z.infer<typeof WorktreeArchiveForceModeSchema>
+
 export const WorktreeArchiveRequestSchema = WorktreeMetadataSchema.extend({
     worktreePath: z.string().min(1),
     managedByHapi: z.literal(true),
     baseRef: z.string().min(1),
     baseCommit: z.string().min(1),
-    hostPid: z.number().int().positive()
+    hostPid: z.number().int().positive(),
+    // Set only for the explicit destructive continuation path. The initial
+    // inspection never carries this flag, so normal archive stays non-force.
+    force: z.boolean().optional()
 })
 
 export type WorktreeArchiveRequest = z.infer<typeof WorktreeArchiveRequestSchema>

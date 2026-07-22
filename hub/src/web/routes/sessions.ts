@@ -17,7 +17,7 @@ import {
     UploadFileRequestSchema
 } from '@hapi/protocol'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
-import type { SlashCommand } from '@hapi/protocol/apiTypes'
+import { ArchiveSessionRequestSchema, type SlashCommand } from '@hapi/protocol/apiTypes'
 import { Hono, type Context } from 'hono'
 import { WorktreeArchiveBlockedError, type SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
@@ -333,12 +333,30 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: 'Session is inactive' }, 409)
         }
 
+        const rawBody = await c.req.text()
+        let body: unknown = {}
+        if (rawBody.trim().length > 0) {
+            try {
+                body = JSON.parse(rawBody)
+            } catch {
+                return c.json({ error: 'Invalid JSON body' }, 400)
+            }
+        }
+        const parsedRequest = ArchiveSessionRequestSchema.safeParse(body)
+        if (!parsedRequest.success) {
+            return c.json({ error: 'Invalid archive request' }, 400)
+        }
+
         if (sessionResult.session.metadata?.worktree) {
             try {
-                await engine.archiveWorktreeSession(sessionResult.sessionId)
+                await engine.archiveWorktreeSession(sessionResult.sessionId, parsedRequest.data)
             } catch (error) {
                 if (error instanceof WorktreeArchiveBlockedError) {
-                    return c.json({ error: error.message, code: error.code }, 409)
+                    return c.json({
+                        error: error.message,
+                        code: error.code,
+                        forceMode: error.forceMode
+                    }, 409)
                 }
                 throw error
             }
