@@ -3,7 +3,9 @@ import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import {
     ArchiveCodexSessionRpcResponseSchema,
     CursorChatStoreStatusSchema,
-    ListCodexSessionsRpcResponseSchema
+    ListCodexSessionsRpcResponseSchema,
+    WorktreeArchiveCleanupSchema,
+    WorktreeArchiveInspectionSchema
 } from '@hapi/protocol/apiTypes'
 import type {
     CodexModelSummary,
@@ -26,7 +28,10 @@ import type {
     OpencodeReasoningEffortResponse,
     PathExistsResponse,
     SlashCommandsResponse,
-    UploadFileResponse
+    UploadFileResponse,
+    WorktreeArchiveCleanup,
+    WorktreeArchiveInspection,
+    WorktreeArchiveRequest
 } from '@hapi/protocol/apiTypes'
 import type { Server } from 'socket.io'
 import type { RpcRegistry } from '../socket/rpcRegistry'
@@ -75,6 +80,8 @@ export type RpcListOpencodeModelsResponse = OpencodeModelsResponse
 export type RpcListGrokModelsResponse = GrokModelsResponse
 export type RpcListGrokReasoningEffortOptionsResponse = GrokReasoningEffortResponse
 export type RpcListOpencodeReasoningEffortOptionsResponse = OpencodeReasoningEffortResponse
+export type RpcWorktreeArchiveInspection = WorktreeArchiveInspection
+export type RpcWorktreeArchiveCleanup = WorktreeArchiveCleanup
 
 export class RpcGateway {
     constructor(
@@ -136,6 +143,20 @@ export class RpcGateway {
 
     async killSession(sessionId: string): Promise<void> {
         await this.sessionRpc(sessionId, RPC_METHODS.KillSession, {})
+    }
+
+    async prepareWorktreeArchive(sessionId: string): Promise<void> {
+        await this.sessionRpc(sessionId, RPC_METHODS.PrepareWorktreeArchive, {})
+    }
+
+    async inspectWorktreeArchive(machineId: string, request: WorktreeArchiveRequest): Promise<RpcWorktreeArchiveInspection> {
+        const result = await this.machineRpc(machineId, RPC_METHODS.InspectWorktreeArchive, request)
+        return WorktreeArchiveInspectionSchema.parse(result)
+    }
+
+    async cleanupWorktreeArchive(machineId: string, request: WorktreeArchiveRequest): Promise<RpcWorktreeArchiveCleanup> {
+        const result = await this.machineRpc(machineId, RPC_METHODS.CleanupWorktreeArchive, request)
+        return WorktreeArchiveCleanupSchema.parse(result)
     }
 
     async handoffSessionToLocal(sessionId: string): Promise<void> {

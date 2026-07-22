@@ -62,4 +62,26 @@ describe('registerKillSessionHandler (tiann/hapi#914)', () => {
 
         expect(cleanupAndExit).toHaveBeenCalled()
     })
+
+    it('prepares lifecycle-aware sessions for worktree cleanup without using KillSession', async () => {
+        const registry = makeRegistry()
+        const lifecycle = {
+            setArchiveReason: vi.fn(),
+            cleanupAndExit: vi.fn(async () => {}),
+            beginWorktreeArchive: vi.fn()
+        }
+
+        registerKillSessionHandler(
+            registry as unknown as Parameters<typeof registerKillSessionHandler>[0],
+            lifecycle
+        )
+
+        const handler = registry.handlers.get(RPC_METHODS.PrepareWorktreeArchive)
+        await expect(handler?.()).resolves.toEqual({
+            success: true,
+            message: 'Preparing worktree archive'
+        })
+        expect(lifecycle.beginWorktreeArchive).toHaveBeenCalledOnce()
+        expect(lifecycle.cleanupAndExit).not.toHaveBeenCalled()
+    })
 })

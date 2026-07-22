@@ -202,4 +202,17 @@ describe('createRunnerLifecycle archiveReason defaults (tiann/hapi#914)', () => 
             archiveReason: 'User terminated'
         })
     })
+
+    it('ends for worktree cleanup without writing archived metadata', async () => {
+        const session = createMockApiSessionWithMetadataCapture()
+        const lifecycle = createRunnerLifecycle({ session, logTag: 'test' })
+        const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never)
+
+        lifecycle.beginWorktreeArchive()
+        await new Promise((resolve) => setImmediate(resolve))
+
+        expect(session.metadataWrites).toHaveLength(0)
+        expect(session.sendSessionDeath).toHaveBeenCalledWith('terminated')
+        exitSpy.mockRestore()
+    })
 })

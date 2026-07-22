@@ -8,7 +8,16 @@
  */
 
 import { isKnownFlavor, type LocalResumeTarget, type ResumableSession } from '@hapi/protocol'
-import type { CursorChatStoreStatus, CursorMigrateOutcome, CursorMigrateToAcpRequest, QueuedStateResponse, SlashCommandsResponse } from '@hapi/protocol/apiTypes'
+import {
+    WorktreeArchiveRequestSchema,
+    type CursorChatStoreStatus,
+    type CursorMigrateOutcome,
+    type CursorMigrateToAcpRequest,
+    type QueuedStateResponse,
+    type SlashCommandsResponse,
+    type WorktreeArchiveBlockerCode,
+    type WorktreeArchiveRequest
+} from '@hapi/protocol/apiTypes'
 import type { AgentFlavor, CodexCollaborationMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
 import { unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
 import type { Server } from 'socket.io'
@@ -88,6 +97,16 @@ export type LocalHandoffResult =
 export type CursorChatStoreStatusResult =
     | { type: 'success'; status: CursorChatStoreStatus }
     | { type: 'error'; message: string; code: 'session_not_found' | 'access_denied' | 'resume_unavailable' | 'no_machine_online' | 'probe_failed' }
+
+export class WorktreeArchiveBlockedError extends Error {
+    constructor(
+        readonly code: WorktreeArchiveBlockerCode,
+        message: string
+    ) {
+        super(message)
+        this.name = 'WorktreeArchiveBlockedError'
+    }
+}
 
 function asRecord(value: unknown): Record<string, unknown> | null {
     return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -601,6 +620,80 @@ export class SyncEngine {
             }
         }
         this.handleSessionEnd({ sid: sessionId, time: Date.now() })
+    }
+
+    async archiveWorktreeSession(sessionId: string): Promise<void> {
+        const initial = this.sessionCache.getSession(sessionId) ?? this.sessionCache.refreshSession(sessionId)
+        if (!initial?.metadata) {
+            throw new WorktreeArchiveBlockedError('worktree_unverified', 'Worktree metadata is unavailable.')
+        }
+        if (initial.active && (initial.thinking || (initial.backgroundTaskCount ?? 0) > 0)) {
+            throw new WorktreeArchiveBlockedError('session_busy', 'Session is still working. Wait for it to become idle before archiving.')
+        }
+
+        const request = this.buildWorktreeArchiveRequest(initial)
+        const machineId = initial.metadata.machineId
+        if (!machineId) {
+            throw new WorktreeArchiveBlockedError('machine_offline', 'Session machine is unavailable.')
+        }
+
+        let inspection
+        try {
+            inspection = await this.rpcGateway.inspectWorktreeArchive(machineId, request)
+        } catch (error) {
+            throw this.asWorktreeMachineError(error)
+        }
+        if (inspection.type === 'blocker') {
+            throw new WorktreeArchiveBlockedError(inspection.code, inspection.message)
+        }
+
+        if (initial.active) {
+            try {
+                await this.rpcGateway.prepareWorktreeArchive(sessionId)
+            } catch (error) {
+                if (error instanceof RpcTargetMissingError) {
+                    throw new WorktreeArchiveBlockedError('machine_offline', 'Session runner is offline.')
+                }
+                throw new WorktreeArchiveBlockedError('stop_failure', 'Session could not be stopped for worktree cleanup.')
+            }
+
+            if (!(await this.waitForSessionInactive(sessionId))) {
+                throw new WorktreeArchiveBlockedError('stop_failure', 'Session did not stop in time; worktree was not removed.')
+            }
+        }
+
+        let cleanup
+        try {
+            cleanup = await this.rpcGateway.cleanupWorktreeArchive(machineId, request)
+        } catch (error) {
+            throw this.asWorktreeMachineError(error)
+        }
+        if (cleanup.type === 'blocker') {
+            throw new WorktreeArchiveBlockedError(cleanup.code, cleanup.message)
+        }
+
+        this.sessionCache.markSessionArchivedFromHub(sessionId, 'Archived after worktree cleanup')
+    }
+
+    private buildWorktreeArchiveRequest(session: Session): WorktreeArchiveRequest {
+        const parsed = WorktreeArchiveRequestSchema.safeParse({
+            ...session.metadata?.worktree,
+            hostPid: session.metadata?.hostPid
+        })
+        if (!parsed.success) {
+            throw new WorktreeArchiveBlockedError(
+                'worktree_unverified',
+                'Worktree was not created with verifiable HAPI cleanup metadata.'
+            )
+        }
+        return parsed.data
+    }
+
+    private asWorktreeMachineError(error: unknown): WorktreeArchiveBlockedError {
+        if (error instanceof RpcTargetMissingError) {
+            return new WorktreeArchiveBlockedError('machine_offline', 'Session runner is offline.')
+        }
+        return new WorktreeArchiveBlockedError('machine_offline', 'Session runner could not complete the worktree check.')
     }
 
     /**

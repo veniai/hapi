@@ -1,0 +1,29 @@
+task=archive-cleanup-worktree
+# 完成判据：worktree session 仅在归属可验证、干净且无未合并成果时才能归档；
+# 成功时删除 worktree 与分支并保留对话，所有 blocker 当场失败且不归档。
+# 本 manifest 应在代码实现前由人审冻结；执行中不得修改条件。
+
+[cond:typecheck]
+executable=bun
+args=typecheck
+expected_exit=0
+
+[cond:test]
+executable=bun
+args=run test
+expected_exit=0
+
+[cond:build-web]
+executable=bun
+args=run build:web
+expected_exit=0
+
+[cond:browser-archive-blockers]
+type=mcp
+target=playwright
+behavior=本地 Web 中归档 worktree session；dirty、未合并提交、runner 离线或归属异常时显示对应 blocker 且 session 不显示 archived；干净已合并时归档成功
+pass_criteria=四类 blocker 均显示可行动错误且 session 留在未归档状态；成功场景显示 archived
+
+[cond:isolated-git-flow]
+type=human
+# 人审：在临时 Git repo 中确认成功归档后 worktree 与分支均不存在；失败场景目录和分支仍在；全程未使用 --force，也不操作既有项目 worktree。

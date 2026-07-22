@@ -417,7 +417,10 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
             HAPI_WORKTREE_BRANCH: worktreeInfo.branch,
             HAPI_WORKTREE_NAME: worktreeInfo.name,
             HAPI_WORKTREE_PATH: worktreeInfo.worktreePath,
-            HAPI_WORKTREE_CREATED_AT: String(worktreeInfo.createdAt)
+            HAPI_WORKTREE_CREATED_AT: String(worktreeInfo.createdAt),
+            HAPI_WORKTREE_MANAGED_BY_HAPI: worktreeInfo.managedByHapi ? '1' : '',
+            HAPI_WORKTREE_BASE_REF: worktreeInfo.baseRef ?? '',
+            HAPI_WORKTREE_BASE_COMMIT: worktreeInfo.baseCommit ?? ''
           };
         }
 

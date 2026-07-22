@@ -19,7 +19,7 @@ import {
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import type { SlashCommand } from '@hapi/protocol/apiTypes'
 import { Hono, type Context } from 'hono'
-import type { SyncEngine } from '../../sync/syncEngine'
+import { WorktreeArchiveBlockedError, type SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { requireSessionFromParam, requireSyncEngine } from './guards'
 
@@ -333,7 +333,18 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: 'Session is inactive' }, 409)
         }
 
-        await engine.archiveSession(sessionResult.sessionId)
+        if (sessionResult.session.metadata?.worktree) {
+            try {
+                await engine.archiveWorktreeSession(sessionResult.sessionId)
+            } catch (error) {
+                if (error instanceof WorktreeArchiveBlockedError) {
+                    return c.json({ error: error.message, code: error.code }, 409)
+                }
+                throw error
+            }
+        } else {
+            await engine.archiveSession(sessionResult.sessionId)
+        }
         return c.json({ ok: true })
     })
 
@@ -664,7 +675,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return sessionResult
         }
 
-        if (sessionResult.session.active) {
+        if (sessionResult.session.active || sessionResult.session.metadata?.lifecycleState !== 'archived') {
             return c.json({ error: 'Cannot delete active session. Archive it first.' }, 409)
         }
 

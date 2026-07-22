@@ -459,10 +459,24 @@ export class ApiClient {
     }
 
     async archiveSession(sessionId: string): Promise<void> {
-        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/archive`, {
-            method: 'POST',
-            body: JSON.stringify({})
-        })
+        try {
+            await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/archive`, {
+                method: 'POST',
+                body: JSON.stringify({})
+            })
+        } catch (error) {
+            if (error instanceof ApiError && error.status === 409 && error.body) {
+                let blockerMessage: string | undefined
+                try {
+                    const body = JSON.parse(error.body) as ErrorPayload
+                    blockerMessage = typeof body.error === 'string' ? body.error : undefined
+                } catch {
+                    // Keep the original API error when the response is not JSON.
+                }
+                if (blockerMessage) throw new Error(blockerMessage)
+            }
+            throw error
+        }
     }
 
     async reopenSession(sessionId: string): Promise<ReopenSessionResponse> {

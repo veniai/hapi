@@ -1,8 +1,13 @@
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { access, mkdir } from 'node:fs/promises';
+import { access, mkdir, realpath } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
+import type {
+  WorktreeArchiveCleanup,
+  WorktreeArchiveInspection,
+  WorktreeArchiveRequest
+} from '@hapi/protocol/apiTypes';
 
 const execFileAsync = promisify(execFile);
 
@@ -12,6 +17,9 @@ export type WorktreeInfo = {
   branch: string;
   name: string;
   createdAt: number;
+  managedByHapi?: true;
+  baseRef?: string;
+  baseCommit?: string;
 };
 
 type WorktreeResult =
@@ -47,6 +55,26 @@ async function resolveRepoRoot(basePath: string): Promise<string> {
     throw new Error('Unable to resolve Git repository root.');
   }
   return root;
+}
+
+async function readCurrentBranch(repoRoot: string): Promise<string | undefined> {
+  try {
+    const result = await runGit(['symbolic-ref', '--quiet', '--short', 'HEAD'], repoRoot);
+    const branch = result.stdout.trim();
+    return branch || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function readCurrentCommit(repoRoot: string): Promise<string | undefined> {
+  try {
+    const result = await runGit(['rev-parse', '--verify', 'HEAD^{commit}'], repoRoot);
+    const commit = result.stdout.trim();
+    return commit || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function toSlug(value: string): string {
@@ -104,6 +132,8 @@ export async function createWorktree(options: {
 }): Promise<WorktreeResult> {
   const { basePath, nameHint } = options;
   let repoRoot: string;
+  let baseRef: string | undefined;
+  let baseCommit: string | undefined;
 
   try {
     repoRoot = await resolveRepoRoot(basePath);
@@ -114,6 +144,11 @@ export async function createWorktree(options: {
       error: `Path is not a Git repository: ${message}`
     };
   }
+
+  [baseRef, baseCommit] = await Promise.all([
+    readCurrentBranch(repoRoot),
+    readCurrentCommit(repoRoot)
+  ]);
 
   const repoParent = dirname(repoRoot);
   const repoName = basename(repoRoot);
@@ -144,7 +179,10 @@ export async function createWorktree(options: {
           worktreePath,
           branch,
           name,
-          createdAt: Date.now()
+          createdAt: Date.now(),
+          managedByHapi: true,
+          baseRef,
+          baseCommit
         }
       };
     } catch (error) {
@@ -167,10 +205,147 @@ export async function removeWorktree(options: {
   worktreePath: string;
 }): Promise<RemoveWorktreeResult> {
   try {
-    await runGit(['worktree', 'remove', '--force', options.worktreePath], options.repoRoot);
+    await runGit(['worktree', 'remove', options.worktreePath], options.repoRoot);
     return { ok: true };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return { ok: false, error: message };
+  }
+}
+
+function blocker(code: Extract<WorktreeArchiveInspection, { type: 'blocker' }>['code'], message: string): WorktreeArchiveInspection {
+  return { type: 'blocker', code, message };
+}
+
+type RegisteredWorktree = {
+  path: string;
+  branch?: string;
+};
+
+function parseRegisteredWorktrees(output: string): RegisteredWorktree[] {
+  const entries: RegisteredWorktree[] = [];
+  let current: RegisteredWorktree | null = null;
+
+  for (const line of output.split(/\r?\n/)) {
+    if (!line) {
+      if (current) entries.push(current);
+      current = null;
+      continue;
+    }
+    if (line.startsWith('worktree ')) {
+      if (current) entries.push(current);
+      current = { path: line.slice('worktree '.length) };
+      continue;
+    }
+    if (current && line.startsWith('branch refs/heads/')) {
+      current.branch = line.slice('branch refs/heads/'.length);
+    }
+  }
+  if (current) entries.push(current);
+  return entries;
+}
+
+async function canonicalPath(path: string): Promise<string | null> {
+  try {
+    return await realpath(path);
+  } catch {
+    return null;
+  }
+}
+
+async function verifyWorktreeArchiveTarget(target: WorktreeArchiveRequest): Promise<WorktreeArchiveInspection> {
+  const canonicalBase = await canonicalPath(target.basePath);
+  const canonicalWorktree = await canonicalPath(target.worktreePath);
+  if (!canonicalBase || !canonicalWorktree || canonicalBase === canonicalWorktree) {
+    return blocker('worktree_unverified', 'Worktree path cannot be safely verified.');
+  }
+
+  let repoRoot: string;
+  try {
+    repoRoot = await resolveRepoRoot(canonicalBase);
+  } catch {
+    return blocker('worktree_unverified', 'Recorded base path is not a Git repository.');
+  }
+  const canonicalRepoRoot = await canonicalPath(repoRoot);
+  if (canonicalRepoRoot !== canonicalBase) {
+    return blocker('worktree_unverified', 'Recorded base path is not the repository root.');
+  }
+
+  try {
+    const registered = parseRegisteredWorktrees((await runGit(['worktree', 'list', '--porcelain'], canonicalRepoRoot)).stdout);
+    const canonicalRegistered = await Promise.all(registered.map(async (entry) => ({
+      ...entry,
+      path: await canonicalPath(entry.path)
+    })));
+    const match = canonicalRegistered.find((entry) => entry.path === canonicalWorktree);
+    if (!match || match.branch !== target.branch) {
+      return blocker('worktree_unverified', 'Worktree registration does not match the recorded branch.');
+    }
+
+    const currentBranch = (await runGit(['symbolic-ref', '--quiet', '--short', 'HEAD'], canonicalWorktree)).stdout.trim();
+    if (currentBranch !== target.branch) {
+      return blocker('worktree_unverified', 'Worktree currently has a different branch checked out.');
+    }
+
+    const baseRefExists = await runGit(
+      ['rev-parse', '--verify', `${target.baseRef}^{commit}`],
+      canonicalRepoRoot
+    ).then(() => true).catch(() => false);
+    if (!baseRefExists) {
+      return blocker('worktree_unverified', 'Recorded base branch no longer exists.');
+    }
+    const baseDescendsFromCreation = await runGit(
+      ['merge-base', '--is-ancestor', target.baseCommit, target.baseRef],
+      canonicalRepoRoot
+    ).then(() => true).catch(() => false);
+    if (!baseDescendsFromCreation) {
+      return blocker('worktree_unverified', 'The recorded base branch no longer contains the creation baseline.');
+    }
+
+    const status = (await runGit(['status', '--porcelain'], canonicalWorktree)).stdout;
+    if (status.trim()) {
+      return blocker('dirty_worktree', 'Worktree has uncommitted or untracked changes.');
+    }
+
+    const branchMerged = await runGit(
+      ['merge-base', '--is-ancestor', target.branch, target.baseRef],
+      canonicalRepoRoot
+    ).then(() => true).catch(() => false);
+    if (!branchMerged) {
+      return blocker('unmerged_commits', 'Worktree branch still contains commits not merged into its creation base.');
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return blocker('git_failure', `Git could not inspect this worktree: ${message}`);
+  }
+
+  return { type: 'ready' };
+}
+
+export async function inspectWorktreeArchive(target: WorktreeArchiveRequest): Promise<WorktreeArchiveInspection> {
+  return await verifyWorktreeArchiveTarget(target);
+}
+
+export async function cleanupWorktreeArchive(target: WorktreeArchiveRequest): Promise<WorktreeArchiveCleanup> {
+  const inspection = await verifyWorktreeArchiveTarget(target);
+  if (inspection.type === 'blocker') {
+    return inspection;
+  }
+
+  const [canonicalBase, canonicalWorktree] = await Promise.all([
+    canonicalPath(target.basePath),
+    canonicalPath(target.worktreePath)
+  ]);
+  if (!canonicalBase || !canonicalWorktree) {
+    return blocker('worktree_unverified', 'Worktree path changed before cleanup could run.');
+  }
+
+  try {
+    await runGit(['worktree', 'remove', canonicalWorktree], canonicalBase);
+    await runGit(['branch', '-d', '--', target.branch], canonicalBase);
+    return { type: 'success' };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return blocker('git_failure', `Git could not clean this worktree: ${message}`);
   }
 }

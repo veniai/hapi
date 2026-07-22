@@ -15,6 +15,12 @@ function createGateway() {
                     if (payload.method.endsWith(':cursor-chat-store-status')) {
                         return JSON.stringify({ onDisk: false, store: null })
                     }
+                    if (payload.method.endsWith(':inspect-worktree-archive')) {
+                        return JSON.stringify({ type: 'ready' })
+                    }
+                    if (payload.method.endsWith(':cleanup-worktree-archive')) {
+                        return JSON.stringify({ type: 'success' })
+                    }
                     return JSON.stringify({
                         success: true,
                         method: payload.method,
@@ -93,6 +99,34 @@ describe('RpcGateway RPC timeouts', () => {
                 homeDir: '/home/recorded-owner'
             })
         }])
+    })
+
+    it('routes worktree archive checks through the owning machine', async () => {
+        const { gateway, calls } = createGateway()
+        const request = {
+            basePath: '/workspace/project',
+            worktreePath: '/workspace/project-worktrees/fix',
+            branch: 'hapi-fix',
+            name: 'fix',
+            managedByHapi: true as const,
+            baseRef: 'main',
+            baseCommit: 'abc123',
+            hostPid: 123
+        }
+
+        await expect(gateway.inspectWorktreeArchive('machine-1', request)).resolves.toEqual({ type: 'ready' })
+        await expect(gateway.cleanupWorktreeArchive('machine-1', request)).resolves.toEqual({ type: 'success' })
+
+        expect(calls).toEqual([
+            {
+                method: 'machine-1:inspect-worktree-archive',
+                params: JSON.stringify(request)
+            },
+            {
+                method: 'machine-1:cleanup-worktree-archive',
+                params: JSON.stringify(request)
+            }
+        ])
     })
 })
 

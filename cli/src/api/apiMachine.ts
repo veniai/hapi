@@ -12,6 +12,9 @@ import type { ClientToServerEvents, ServerToClientEvents, Update, UpdateMachineB
 import {
     ArchiveCodexSessionRpcRequestSchema,
     ListCodexSessionsRpcRequestSchema,
+    WorktreeArchiveRequestSchema,
+    type WorktreeArchiveCleanup,
+    type WorktreeArchiveInspection,
     type ArchiveCodexSessionRpcResponse,
     type ListCodexSessionsRpcResponse,
     type MachineDirectoryEntry,
@@ -42,12 +45,24 @@ import { buildSocketIoExtraHeaderOptions } from './hubExtraHeaders'
 import { collectMachineHealth } from '@/utils/machineHealth'
 import { inspectCursorChatStore } from '@/cursor/cursorChatStoreStatus'
 import { homedir } from 'node:os'
+import { cleanupWorktreeArchive, inspectWorktreeArchive } from '@/runner/worktree'
+import { isProcessAlive } from '@/utils/process'
 import type { CursorChatStoreStatus } from '@hapi/protocol/apiTypes'
 
 type MachineRpcHandlers = {
     spawnSession: (options: SpawnSessionOptions) => Promise<SpawnSessionResult>
     stopSession: (sessionId: string) => boolean
     requestShutdown: () => void
+}
+
+const WORKTREE_ARCHIVE_EXIT_TIMEOUT_MS = 10_000
+
+async function waitForProcessExit(pid: number): Promise<boolean> {
+    const deadline = Date.now() + WORKTREE_ARCHIVE_EXIT_TIMEOUT_MS
+    while (isProcessAlive(pid) && Date.now() < deadline) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 100))
+    }
+    return !isProcessAlive(pid)
 }
 
 interface PathExistsRequest {
@@ -227,6 +242,43 @@ export class ApiMachineClient {
                 return { success: false, error: error instanceof Error ? error.message : 'Failed to list directory' }
             }
         })
+
+        this.rpcHandlerManager.registerHandler<unknown, WorktreeArchiveInspection>(
+            RPC_METHODS.InspectWorktreeArchive,
+            async (params) => {
+                const parsed = WorktreeArchiveRequestSchema.safeParse(params)
+                if (!parsed.success) {
+                    return {
+                        type: 'blocker',
+                        code: 'worktree_unverified',
+                        message: 'Worktree archive request is incomplete or invalid.'
+                    }
+                }
+                return await inspectWorktreeArchive(parsed.data)
+            }
+        )
+
+        this.rpcHandlerManager.registerHandler<unknown, WorktreeArchiveCleanup>(
+            RPC_METHODS.CleanupWorktreeArchive,
+            async (params) => {
+                const parsed = WorktreeArchiveRequestSchema.safeParse(params)
+                if (!parsed.success) {
+                    return {
+                        type: 'blocker',
+                        code: 'worktree_unverified',
+                        message: 'Worktree archive request is incomplete or invalid.'
+                    }
+                }
+                if (!(await waitForProcessExit(parsed.data.hostPid))) {
+                    return {
+                        type: 'blocker',
+                        code: 'stop_failure',
+                        message: 'Session process is still running; worktree was not removed.'
+                    }
+                }
+                return await cleanupWorktreeArchive(parsed.data)
+            }
+        )
 
         // OpenCode model discovery spawns an `opencode acp` subprocess scoped to the
         // requested cwd, so it must obey the same workspace-root containment as
