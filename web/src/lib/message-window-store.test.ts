@@ -6,6 +6,7 @@ import {
     clearMessageWindow,
     fetchLatestMessages,
     fetchNewerMessages,
+    freezeMessageWindowForScrollRestoration,
     gcMessageWindows,
     fetchOlderMessages,
     getQueuedReconcileCandidateLocalIds,
@@ -469,6 +470,54 @@ describe('message-window-store async generations', () => {
         const state = getMessageWindowState(SESSION_ID)
         expect(state.messages.filter((message) => message.id === queued.id)).toHaveLength(1)
         expect(state.pending.some((message) => message.id === queued.id)).toBe(false)
+    })
+})
+
+describe('freezeMessageWindowForScrollRestoration', () => {
+    const SESSION_ID = 'session-scroll-restoration-freeze-test'
+
+    afterEach(() => {
+        clearMessageWindow(SESSION_ID)
+    })
+
+    it('keeps an existing window stable and stages an entry refresh as pending', async () => {
+        const oldMessage = makeAgentMessage({
+            id: 'before-switch',
+            seq: 1,
+            createdAt: 1_700_000_000_000,
+        })
+        const newMessage = makeAgentMessage({
+            id: 'while-away',
+            seq: 2,
+            createdAt: 1_700_000_001_000,
+        })
+        const api = {
+            getMessages: vi.fn()
+                .mockResolvedValueOnce({
+                    messages: [oldMessage],
+                    page: { limit: 50, nextBeforeAt: null, nextBeforeSeq: null, hasMore: false },
+                })
+                .mockResolvedValueOnce({
+                    messages: [newMessage],
+                    page: { limit: 50, nextBeforeAt: null, nextBeforeSeq: null, hasMore: false },
+                }),
+        } as unknown as ApiClient
+
+        await fetchLatestMessages(api, SESSION_ID)
+        expect(getMessageWindowState(SESSION_ID).atBottom).toBe(true)
+
+        expect(freezeMessageWindowForScrollRestoration(SESSION_ID)).toBe(true)
+        await fetchLatestMessages(api, SESSION_ID)
+
+        const state = getMessageWindowState(SESSION_ID)
+        expect(state.atBottom).toBe(false)
+        expect(state.messages.map((message) => message.id)).toEqual(['before-switch'])
+        expect(state.pending.map((message) => message.id)).toEqual(['while-away'])
+    })
+
+    it('does not freeze an empty window needed for a cold latest load', () => {
+        expect(freezeMessageWindowForScrollRestoration(SESSION_ID)).toBe(false)
+        expect(getMessageWindowState(SESSION_ID).atBottom).toBe(true)
     })
 })
 
