@@ -10,6 +10,7 @@ import type { AgentFlavor } from '@hapi/protocol'
 
 export type AgentType = AgentFlavor
 export type SessionType = 'simple' | 'worktree'
+export const DEFAULT_SESSION_TYPE: SessionType = 'worktree'
 // Codex reports supported efforts dynamically; keep this open for new server values.
 export type CodexReasoningEffort = string
 // Grok reports effort values dynamically through ACP, while Claude uses the

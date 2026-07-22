@@ -32,7 +32,14 @@ import {
     saveNewSessionFormDraft,
     shouldRestoreNewSessionFormDraft
 } from './newSessionFormDraft'
-import type { AgentType, LaunchEffort, CodexReasoningEffort, SessionType } from './types'
+import {
+    MODEL_OPTIONS,
+    type AgentType,
+    type CodexReasoningEffort,
+    DEFAULT_SESSION_TYPE,
+    type LaunchEffort,
+    type SessionType
+} from './types'
 import { ActionButtons } from './ActionButtons'
 import { AgentSelector } from './AgentSelector'
 import { DirectorySection } from './DirectorySection'
@@ -46,8 +53,15 @@ import { buildGrokEffortOptions, buildGrokModelOptions, shouldEnableGrokModelDis
 import { ReasoningEffortSelector } from './ReasoningEffortSelector'
 import {
     loadPreferredAgent,
+    loadPreferredAgentSettings,
+    loadPreferredEffort,
+    loadPreferredModelReasoningEffort,
     loadPreferredYoloMode,
     savePreferredAgent,
+    savePreferredEffort,
+    savePreferredGrokPermissionMode,
+    savePreferredModel,
+    savePreferredModelReasoningEffort,
     savePreferredYoloMode,
 } from './preferences'
 import { SessionTypeSelector } from './SessionTypeSelector'
@@ -114,19 +128,32 @@ export function NewSession(props: {
     const { sessions } = useSessions(props.api)
     const { getRecentPaths, addRecentPath, getLastUsedMachineId, setLastUsedMachineId } = useRecentPaths()
 
+    const [initialPreferences] = useState(() => {
+        const initialAgent = loadPreferredAgent()
+        const settings = loadPreferredAgentSettings(initialAgent)
+        const model = settings.model
+        return {
+            agent: initialAgent,
+            model,
+            cursorSelectedBase: settings.cursorSelectedBase,
+            effort: settings.effortByModel[model] ?? 'auto',
+            modelReasoningEffort: settings.modelReasoningEffortByModel[model] ?? 'default',
+            grokPermissionMode: settings.grokPermissionMode
+        }
+    })
     const [machineId, setMachineId] = useState<string | null>(props.initialMachineId ?? null)
     const [directory, setDirectory] = useState(props.initialDirectory ?? '')
     const [suppressSuggestions, setSuppressSuggestions] = useState(false)
     const [isDirectoryFocused, setIsDirectoryFocused] = useState(false)
-    const [agent, setAgent] = useState<AgentType>(loadPreferredAgent)
-    const [model, setModel] = useState('auto')
-    const [cursorSelectedBase, setCursorSelectedBase] = useState('auto')
+    const [agent, setAgent] = useState<AgentType>(initialPreferences.agent)
+    const [model, setModel] = useState(initialPreferences.model)
+    const [cursorSelectedBase, setCursorSelectedBase] = useState(initialPreferences.cursorSelectedBase)
     const pendingCursorBaseRef = useRef<string | null>(null)
-    const [effort, setEffort] = useState<LaunchEffort>('auto')
-    const [modelReasoningEffort, setModelReasoningEffort] = useState<CodexReasoningEffort>('default')
+    const [effort, setEffort] = useState<LaunchEffort>(initialPreferences.effort)
+    const [modelReasoningEffort, setModelReasoningEffort] = useState<CodexReasoningEffort>(initialPreferences.modelReasoningEffort)
     const [yoloMode, setYoloMode] = useState(loadPreferredYoloMode)
-    const [grokPermissionMode, setGrokPermissionMode] = useState<GrokPermissionMode>('default')
-    const [sessionType, setSessionType] = useState<SessionType>('simple')
+    const [grokPermissionMode, setGrokPermissionMode] = useState<GrokPermissionMode>(initialPreferences.grokPermissionMode)
+    const [sessionType, setSessionType] = useState<SessionType>(DEFAULT_SESSION_TYPE)
     const [worktreeName, setWorktreeName] = useState('')
     const [directoryCreationConfirmed, setDirectoryCreationConfirmed] = useState(false)
     const [error, setError] = useState<string | null>(null)
@@ -145,16 +172,6 @@ export function NewSession(props: {
             worktreeInputRef.current?.focus()
         }
     }, [sessionType])
-
-    useEffect(() => {
-        setEffort('auto')
-        setModelReasoningEffort('default')
-        setGrokPermissionMode('default')
-        if (agent !== 'cursor') {
-            setModel('auto')
-            setCursorSelectedBase('auto')
-        }
-    }, [agent])
 
     useEffect(() => {
         savePreferredAgent(agent)
@@ -213,6 +230,7 @@ export function NewSession(props: {
         setModelReasoningEffort(draft.modelReasoningEffort)
         setYoloMode(draft.yoloMode)
         setGrokPermissionMode(draft.grokPermissionMode)
+        setOpencodeSelectedModel(draft.agent === 'opencode' && draft.model !== 'auto' ? draft.model : null)
         setSessionType(draft.sessionType)
         setWorktreeName(draft.worktreeName)
         clearNewSessionFormDraft()
@@ -249,7 +267,11 @@ export function NewSession(props: {
         machineId,
         enabled: agent === 'codex' && Boolean(machineId)
     })
-    const [opencodeSelectedModel, setOpencodeSelectedModel] = useState<string | null>(null)
+    const [opencodeSelectedModel, setOpencodeSelectedModel] = useState<string | null>(
+        initialPreferences.agent === 'opencode' && initialPreferences.model !== 'auto'
+            ? initialPreferences.model
+            : null
+    )
     const runnerSpawnError = useMemo(
         () => formatRunnerSpawnError(selectedMachine),
         [selectedMachine]
@@ -275,6 +297,31 @@ export function NewSession(props: {
         () => codexSupportedReasoningEfforts?.map((value) => ({ value })),
         [codexSupportedReasoningEfforts]
     )
+
+    useEffect(() => {
+        if (agent !== 'claude' && agent !== 'kimi' && agent !== 'pi') {
+            return
+        }
+        if (model === 'auto' || MODEL_OPTIONS[agent].some((option) => option.value === model)) {
+            return
+        }
+        setModel('auto')
+        setEffort(loadPreferredEffort(agent, 'auto'))
+        setModelReasoningEffort(loadPreferredModelReasoningEffort(agent, 'auto'))
+    }, [agent, model])
+
+    useEffect(() => {
+        if (agent !== 'codex' || !machineId || codexModelsState.isLoading) {
+            return
+        }
+        const modelIsAvailable = !codexModelsState.error
+            && codexModelsState.models.some((codexModel) => codexModel.id === model)
+        if (model === 'auto' || modelIsAvailable) {
+            return
+        }
+        setModel('auto')
+        setModelReasoningEffort(loadPreferredModelReasoningEffort('codex', 'auto'))
+    }, [agent, codexModelsState.error, codexModelsState.isLoading, codexModelsState.models, machineId, model])
 
     useEffect(() => {
         if (
@@ -332,6 +379,44 @@ export function NewSession(props: {
     )
 
     useEffect(() => {
+        if (agent !== 'cursor' || !machineId || cursorModelsState.isLoading) {
+            return
+        }
+        if (cursorModelsState.error) {
+            setModel('auto')
+            setCursorSelectedBase('auto')
+            return
+        }
+
+        const availableModelIds = new Set([
+            ...cursorModelsState.availableModels.map((entry) => entry.modelId),
+            ...(cursorModelsState.cliModelSkus ?? []).map((entry) => entry.modelId)
+        ])
+        if (model !== 'auto' && !availableModelIds.has(model)) {
+            setModel('auto')
+            setCursorSelectedBase('auto')
+            return
+        }
+        if (
+            model === 'auto'
+            && cursorSelectedBase !== 'auto'
+            && !cursorPicker.catalog.variantsByBase.has(cursorSelectedBase)
+        ) {
+            setCursorSelectedBase('auto')
+        }
+    }, [
+        agent,
+        cursorModelsState.availableModels,
+        cursorModelsState.cliModelSkus,
+        cursorModelsState.error,
+        cursorModelsState.isLoading,
+        cursorPicker.catalog,
+        cursorSelectedBase,
+        machineId,
+        model
+    ])
+
+    useEffect(() => {
         if (agent !== 'cursor' || cursorModelsState.isLoading) {
             return
         }
@@ -372,7 +457,9 @@ export function NewSession(props: {
             setModel('auto')
             return
         }
-        setModel(resolveWireIdForBaseChange(pendingBase, cursorPicker.catalog, model) ?? 'auto')
+        const nextModel = resolveWireIdForBaseChange(pendingBase, cursorPicker.catalog, model) ?? 'auto'
+        setModel(nextModel)
+        savePreferredModel('cursor', nextModel, pendingBase)
     }, [
         agent,
         cursorModelsState.isLoading,
@@ -417,6 +504,18 @@ export function NewSession(props: {
     const deferredDirectoryExists = deferredDirectory
         ? pathExistence[deferredDirectory]
         : undefined
+    const opencodeModelDiscoveryEnabled = shouldEnableOpencodeModelDiscovery({
+        agent,
+        machineId,
+        cwd: deferredDirectory,
+        cwdExists: deferredDirectoryExists,
+    })
+    const grokModelDiscoveryEnabled = shouldEnableGrokModelDiscovery({
+        agent,
+        machineId,
+        cwd: deferredDirectory,
+        cwdExists: deferredDirectoryExists,
+    })
     const opencodeModelsState = useOpencodeModelsForCwd({
         api: props.api,
         machineId,
@@ -424,23 +523,13 @@ export function NewSession(props: {
         // Gate on positive existence: typing partial paths must not spawn an
         // expensive `opencode acp` probe for a non-existent cwd while the
         // existence check is in flight.
-        enabled: shouldEnableOpencodeModelDiscovery({
-            agent,
-            machineId,
-            cwd: deferredDirectory,
-            cwdExists: deferredDirectoryExists,
-        })
+        enabled: opencodeModelDiscoveryEnabled
     })
     const grokModelsState = useGrokModelsForCwd({
         api: props.api,
         machineId,
         cwd: deferredDirectory,
-        enabled: shouldEnableGrokModelDiscovery({
-            agent,
-            machineId,
-            cwd: deferredDirectory,
-            cwdExists: deferredDirectoryExists,
-        })
+        enabled: grokModelDiscoveryEnabled
     })
     const grokModelOptions = useMemo(
         () => buildGrokModelOptions(grokModelsState.availableModels),
@@ -464,17 +553,69 @@ export function NewSession(props: {
         }
     }, [agent, grokPermissionMode, grokModelsState.autoPermissionModeSupported])
     useEffect(() => {
-        // Auto-pick the OpenCode default model when discovery finishes, so the
-        // form has a sensible value if the user hits Enter without scrolling.
-        if (agent !== 'opencode') return
-        if (opencodeSelectedModel !== null) return
-        const fallback = opencodeModelsState.currentModelId
-            ?? opencodeModelsState.availableModels[0]?.modelId
-            ?? null
-        if (fallback) {
-            setOpencodeSelectedModel(fallback)
+        if (agent !== 'grok' || !grokModelDiscoveryEnabled || grokModelsState.isLoading) {
+            return
         }
-    }, [agent, opencodeSelectedModel, opencodeModelsState.currentModelId, opencodeModelsState.availableModels])
+        const modelIsAvailable = !grokModelsState.error
+            && grokModelsState.availableModels.some((entry) => entry.modelId === model)
+        if (model !== 'auto' && !modelIsAvailable) {
+            setModel('auto')
+            setEffort(loadPreferredEffort('grok', 'auto'))
+            return
+        }
+        if (
+            effort !== 'auto'
+            && !grokEffortOptions.some((option) => option.value === effort)
+        ) {
+            setEffort('auto')
+        }
+    }, [
+        agent,
+        effort,
+        grokEffortOptions,
+        grokModelDiscoveryEnabled,
+        grokModelsState.availableModels,
+        grokModelsState.error,
+        grokModelsState.isLoading,
+        model
+    ])
+    useEffect(() => {
+        if (agent !== 'opencode' || !opencodeModelDiscoveryEnabled || opencodeModelsState.isLoading) {
+            return
+        }
+
+        if (opencodeModelsState.error) {
+            setOpencodeSelectedModel(null)
+            setModel('auto')
+            setModelReasoningEffort(loadPreferredModelReasoningEffort('opencode', 'auto'))
+            return
+        }
+
+        const availableModelIds = new Set(
+            opencodeModelsState.availableModels.map((entry) => entry.modelId)
+        )
+        if (opencodeSelectedModel && availableModelIds.has(opencodeSelectedModel)) {
+            return
+        }
+
+        const savedModel = loadPreferredAgentSettings('opencode').model
+        const fallback = savedModel !== 'auto' && availableModelIds.has(savedModel)
+            ? savedModel
+            : opencodeModelsState.currentModelId && availableModelIds.has(opencodeModelsState.currentModelId)
+                ? opencodeModelsState.currentModelId
+                : opencodeModelsState.availableModels[0]?.modelId ?? null
+        setOpencodeSelectedModel(fallback)
+        setModel(fallback ?? 'auto')
+        setModelReasoningEffort(loadPreferredModelReasoningEffort('opencode', fallback ?? 'auto'))
+    }, [
+        agent,
+        opencodeModelDiscoveryEnabled,
+        opencodeModelsState.availableModels,
+        opencodeModelsState.currentModelId,
+        opencodeModelsState.error,
+        opencodeModelsState.isLoading,
+        opencodeSelectedModel
+    ])
     useEffect(() => {
         // Reset selection when agent / machine / directory changes; new probe = new defaults.
         setOpencodeSelectedModel(null)
@@ -559,10 +700,58 @@ export function NewSession(props: {
         [codexImportSessions, selectedCodexImportSessionId]
     )
 
+    const restoreAgentSettings = useCallback((nextAgent: AgentType) => {
+        const settings = loadPreferredAgentSettings(nextAgent)
+        const nextModel = settings.model
+        setAgent(nextAgent)
+        setModel(nextModel)
+        setCursorSelectedBase(nextAgent === 'cursor' ? settings.cursorSelectedBase : 'auto')
+        setEffort(settings.effortByModel[nextModel] ?? 'auto')
+        setModelReasoningEffort(settings.modelReasoningEffortByModel[nextModel] ?? 'default')
+        setGrokPermissionMode(settings.grokPermissionMode)
+        setOpencodeSelectedModel(
+            nextAgent === 'opencode' && nextModel !== 'auto' ? nextModel : null
+        )
+    }, [])
+
+    const handleAgentChange = useCallback((nextAgent: AgentType) => {
+        restoreAgentSettings(nextAgent)
+    }, [restoreAgentSettings])
+
+    const handleModelChange = useCallback((nextModel: string) => {
+        setModel(nextModel)
+        setEffort(loadPreferredEffort(agent, nextModel))
+        setModelReasoningEffort(loadPreferredModelReasoningEffort(agent, nextModel))
+        savePreferredModel(agent, nextModel)
+    }, [agent])
+
+    const handleOpencodeModelChange = useCallback((nextModel: string | null) => {
+        setOpencodeSelectedModel(nextModel)
+        handleModelChange(nextModel ?? 'auto')
+    }, [handleModelChange])
+
+    const handleEffortChange = useCallback((nextEffort: LaunchEffort) => {
+        setEffort(nextEffort)
+        savePreferredEffort(agent, model, nextEffort)
+    }, [agent, model])
+
+    const handleModelReasoningEffortChange = useCallback((nextEffort: CodexReasoningEffort) => {
+        setModelReasoningEffort(nextEffort)
+        const selectedModel = agent === 'opencode'
+            ? (opencodeSelectedModel ?? 'auto')
+            : model
+        savePreferredModelReasoningEffort(agent, selectedModel, nextEffort)
+    }, [agent, model, opencodeSelectedModel])
+
+    const handleGrokPermissionModeChange = useCallback((nextMode: GrokPermissionMode) => {
+        setGrokPermissionMode(nextMode)
+        savePreferredGrokPermissionMode(agent, nextMode)
+    }, [agent])
+
     const handleMachineChange = useCallback((newMachineId: string) => {
         setMachineId(newMachineId)
-        setModel('auto')
-        setCursorSelectedBase('auto')
+        restoreAgentSettings(agent)
+        setOpencodeSelectedModel(null)
         setSelectedCodexImportSessionId(null)
         setCodexImportSessions([])
         setCodexImportMachineId(null)
@@ -572,27 +761,33 @@ export function NewSession(props: {
         } else {
             setDirectory('')
         }
-    }, [getRecentPaths])
+    }, [agent, getRecentPaths, restoreAgentSettings])
 
     const handleCursorBaseChange = useCallback((baseKey: string) => {
         if (baseKey === 'auto') {
             pendingCursorBaseRef.current = null
             setCursorSelectedBase('auto')
             setModel('auto')
+            savePreferredModel('cursor', 'auto', 'auto')
             return
         }
         setCursorSelectedBase(baseKey)
         if (cursorModelsState.isLoading || cursorPicker.catalog.variantsByBase.size === 0) {
             pendingCursorBaseRef.current = baseKey
+            setModel('auto')
+            savePreferredModel('cursor', 'auto', baseKey)
             return
         }
         pendingCursorBaseRef.current = null
-        setModel(resolveWireIdForBaseChange(baseKey, cursorPicker.catalog, model) ?? 'auto')
+        const nextModel = resolveWireIdForBaseChange(baseKey, cursorPicker.catalog, model) ?? 'auto'
+        setModel(nextModel)
+        savePreferredModel('cursor', nextModel, baseKey)
     }, [cursorModelsState.isLoading, cursorPicker.catalog, model])
 
     const handleCursorEffortChange = useCallback((wireId: string) => {
         if (wireId === 'auto') {
             setModel('auto')
+            savePreferredModel('cursor', 'auto', cursorSelectedBase)
             return
         }
         const baseKey = cursorSelectedBase !== 'auto'
@@ -602,6 +797,7 @@ export function NewSession(props: {
             return
         }
         setModel(wireId)
+        savePreferredModel('cursor', wireId, baseKey ?? 'auto')
     }, [cursorPicker.catalog, cursorPicker.baseKey, cursorSelectedBase])
 
     const handleChooseFolderClick = useCallback(() => {
@@ -610,7 +806,7 @@ export function NewSession(props: {
         }
         saveNewSessionFormDraft({
             agent,
-            model,
+            model: agent === 'opencode' ? (opencodeSelectedModel ?? 'auto') : model,
             cursorSelectedBase,
             machineId,
             effort,
@@ -625,6 +821,7 @@ export function NewSession(props: {
         props.onChooseFolder,
         agent,
         model,
+        opencodeSelectedModel,
         cursorSelectedBase,
         machineId,
         effort,
@@ -845,7 +1042,7 @@ export function NewSession(props: {
             <AgentSelector
                 agent={agent}
                 isDisabled={isFormDisabled}
-                onAgentChange={setAgent}
+                onAgentChange={handleAgentChange}
             />
             {agent === 'codex' ? (
                 <CodexImportSelectButton
@@ -869,7 +1066,7 @@ export function NewSession(props: {
                     availableModels={opencodeModelsState.availableModels}
                     currentModelId={opencodeModelsState.currentModelId}
                     selectedModel={opencodeSelectedModel}
-                    onModelChange={setOpencodeSelectedModel}
+                    onModelChange={handleOpencodeModelChange}
                     onRetry={opencodeModelsState.refetch}
                 />
             ) : (
@@ -890,9 +1087,11 @@ export function NewSession(props: {
                                     return
                                 }
                                 setModel(value)
-                                setCursorSelectedBase(
-                                    value === 'auto' ? 'auto' : resolveCursorBaseFromWire(value, cursorPicker.catalog)
-                                )
+                                const base = value === 'auto'
+                                    ? 'auto'
+                                    : resolveCursorBaseFromWire(value, cursorPicker.catalog)
+                                setCursorSelectedBase(base)
+                                savePreferredModel('cursor', value, base)
                             }}
                         />
                         {showCursorVariantPicker ? (
@@ -935,7 +1134,7 @@ export function NewSession(props: {
                             : agent === 'grok' && grokModelsState.error
                                 ? `${t('newSession.model.loadFailed')}: ${grokModelsState.error}`
                                 : null}
-                        onModelChange={setModel}
+                        onModelChange={handleModelChange}
                     />
                 )
             )}
@@ -943,7 +1142,7 @@ export function NewSession(props: {
                 agent={agent}
                 effort={effort}
                 isDisabled={isFormDisabled}
-                onEffortChange={setEffort}
+                onEffortChange={handleEffortChange}
                 grokOptions={agent === 'grok' ? grokEffortOptions : undefined}
             />
             <ReasoningEffortSelector
@@ -951,14 +1150,14 @@ export function NewSession(props: {
                 value={modelReasoningEffort}
                 availableOptions={agent === 'codex' ? codexReasoningEffortOptions : undefined}
                 isDisabled={isFormDisabled || (agent === 'codex' && codexModelsState.isLoading)}
-                onChange={setModelReasoningEffort}
+                onChange={handleModelReasoningEffortChange}
             />
             <GrokPermissionModeSelector
                 agent={agent}
                 value={grokPermissionMode}
                 autoPermissionModeSupported={grokModelsState.autoPermissionModeSupported}
                 isDisabled={isFormDisabled}
-                onChange={setGrokPermissionMode}
+                onChange={handleGrokPermissionModeChange}
             />
             {agent !== 'grok' ? (
                 <YoloToggle
