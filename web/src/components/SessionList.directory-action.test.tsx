@@ -146,6 +146,47 @@ describe('SessionList action menu parity', () => {
     })
 })
 
+describe('SessionList worktree presentation', () => {
+    it('shows only the worktree marker and removes the worktree subtitle', () => {
+        const session = makeSession({
+            id: 'worktree-session',
+            active: true,
+            updatedAt: Date.now(),
+            metadata: {
+                path: '/work/hapi-worktrees/sidebar-search',
+                machineId: 'machine-1',
+                name: 'Sidebar task',
+                flavor: 'codex',
+                worktree: {
+                    basePath: '/work/hapi',
+                    branch: 'hapi-fix/sidebar-search',
+                    name: 'sidebar-search',
+                    worktreePath: '/work/hapi-worktrees/sidebar-search'
+                }
+            }
+        })
+
+        renderWithProviders(
+            <SessionList
+                sessions={[session]}
+                selectedSessionId={null}
+                onSelect={vi.fn()}
+                onNewSession={vi.fn()}
+                onRefresh={vi.fn()}
+                isLoading={false}
+                renderHeader={false}
+                api={null}
+            />
+        )
+
+        const indicator = screen.getByTestId('session-worktree-indicator')
+        expect(indicator).toHaveAttribute('aria-label', 'Worktree session')
+        expect(screen.queryByText('sidebar-search')).toBeNull()
+        expect(screen.queryByText('hapi-fix/sidebar-search')).toBeNull()
+        expect(screen.queryByText('/work/hapi-worktrees/sidebar-search')).toBeNull()
+    })
+})
+
 describe('SessionList collapse behavior', () => {
     function renderSessionList(sessions: SessionSummary[], selectedSessionId = 'session-running') {
         return (

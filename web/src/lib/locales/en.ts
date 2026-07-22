@@ -109,6 +109,7 @@ export default {
   'session.item.agent': 'agent',
   'session.item.model': 'model',
   'session.item.worktree': 'worktree',
+  'session.item.worktree.tooltip': 'Worktree session',
   'session.item.pending': 'pending',
   'session.item.thinking': 'thinking',
   'session.item.permission': 'Permission required',
