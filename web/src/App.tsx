@@ -20,8 +20,8 @@ import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { useTranslation } from '@/lib/use-translation'
 import { VoiceProvider } from '@/lib/voice-context'
 import { requireHubUrlForLogin } from '@/lib/runtime-config'
-import { getAppGlobalSseSubscription, getAppSessionSseSubscription } from '@/lib/appSseSubscriptions'
-import { reconcileQueuedStateAfterConnect } from '@/lib/queued-state-reconciliation'
+import { getAppGlobalSseSubscription } from '@/lib/appSseSubscriptions'
+import { useQueuedStateReconciliation } from '@/hooks/useQueuedStateReconciliation'
 import { LoginPrompt } from '@/components/LoginPrompt'
 import { InstallPrompt } from '@/components/InstallPrompt'
 import { OfflineBanner } from '@/components/OfflineBanner'
@@ -267,15 +267,6 @@ function AppInner() {
         void fetchLatestMessages(api, event.sessionId)
     }, [api, selectedSessionId])
 
-    const handleSessionSseConnect = useCallback(() => {
-        if (!api || !selectedSessionId) {
-            return
-        }
-        void reconcileQueuedStateAfterConnect(api, selectedSessionId).catch((error) => {
-            console.error('Failed to reconcile queued state after SSE connect:', error)
-        })
-    }, [api, selectedSessionId])
-
     const translateIncomingToast = useCallback((title: string, body: string): { title: string; body: string } => {
         const normalizedTitle = title.trim()
         const normalizedBody = body.trim()
@@ -337,12 +328,15 @@ function AppInner() {
     }, [addToast, translateIncomingToast])
 
     const globalEventSubscription = useMemo(() => getAppGlobalSseSubscription(), [])
-    const sessionEventSubscription = useMemo(
-        () => getAppSessionSseSubscription(selectedSessionId),
-        [selectedSessionId]
-    )
     const sseEnabled = Boolean(api && token)
 
+    // Single global `{ all: true }` SSE connection (session-scoped SSE merged in).
+    // The global connection ingests message-received into any session window the user
+    // has opened (useSSE gates on hasMessageWindow), so switching sessions needs no new
+    // connection — the opened window is already kept live by ingest. (useMessages still
+    // fires a background fetchLatest on entry as a backstop, not a re-fetch from blank.)
+    // messages-invalidated (handleSseEvent) rides here; queued-state reconcile is driven
+    // by useQueuedStateReconciliation below, gated on subscriptionId.
     const { subscriptionId: globalSubscriptionId } = useSSE({
         enabled: sseEnabled,
         token: token ?? '',
@@ -351,18 +345,8 @@ function AppInner() {
         scope: 'global',
         onConnect: handleSseConnect,
         onDisconnect: handleSseDisconnect,
-        onEvent: () => {},
+        onEvent: handleSseEvent,
         onToast: handleToast
-    })
-
-    const { subscriptionId: sessionSubscriptionId } = useSSE({
-        enabled: sseEnabled && Boolean(sessionEventSubscription),
-        token: token ?? '',
-        baseUrl,
-        subscription: sessionEventSubscription ?? undefined,
-        scope: 'full',
-        onConnect: handleSessionSseConnect,
-        onEvent: handleSseEvent
     })
 
     useVisibilityReporter({
@@ -371,11 +355,9 @@ function AppInner() {
         enabled: sseEnabled
     })
 
-    useVisibilityReporter({
-        api,
-        subscriptionId: sessionSubscriptionId,
-        enabled: sseEnabled && Boolean(sessionEventSubscription)
-    })
+    // Reconcile queued state once per (connection, session) — first entry, session
+    // switch, and reconnect — gated on subscriptionId so syncEngine is ready first.
+    useQueuedStateReconciliation(api, selectedSessionId, globalSubscriptionId)
 
     // Loading auth source
     if (isAuthSourceLoading) {
