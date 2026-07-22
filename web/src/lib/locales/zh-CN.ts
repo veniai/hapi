@@ -109,6 +109,7 @@ export default {
   'session.item.agent': '代理',
   'session.item.model': '模型',
   'session.item.worktree': '工作树',
+  'session.item.worktree.tooltip': '工作树会话',
   'session.item.pending': '待处理',
   'session.item.thinking': '思考中',
   'session.item.permission': '需要权限',

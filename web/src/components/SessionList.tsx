@@ -8,7 +8,7 @@ import { SessionActionMenu } from '@/components/SessionActionMenu'
 import { SessionExportDialog } from '@/components/SessionExportDialog'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
-import { CopyIcon, CheckIcon, ScheduleIcon } from '@/components/icons'
+import { CopyIcon, CheckIcon, ScheduleIcon, GitBranchIcon } from '@/components/icons'
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
 import { DEFAULT_SESSION_PREVIEW_LIMIT, useSessionPreviewLimit } from '@/hooks/useSessionPreviewLimit'
@@ -655,7 +655,7 @@ function SessionItem(props: {
     })
 
     const sessionName = getSessionTitle(s)
-    const worktreeLabel = getWorktreeSessionLabel(s)
+    const isWorktreeSession = Boolean(s.metadata?.worktree)
     const todoProgress = getTodoProgress(s)
     // The list owns one last-seen subscription and passes each row its value.
     // Per-row subscriptions made every watermark update rerender the whole list N times.
@@ -702,10 +702,21 @@ function SessionItem(props: {
                 aria-current={selected ? 'page' : undefined}
                 aria-describedby={describedBy}
             >
-                <div className={`flex items-center justify-between gap-3 ${!s.active ? 'opacity-50' : ''}`}>
-                    <div className="flex items-center gap-2 min-w-0">
+                <div className="flex min-w-0 items-center justify-between gap-3">
+                    <div className={`flex min-w-0 flex-1 items-center gap-2 ${!s.active ? 'opacity-50' : ''}`}>
                         <AgentFlavorIcon flavor={s.metadata?.flavor} className="h-4 w-4 shrink-0" />
-                        <div className={`truncate text-sm font-medium ${sessionTitleColor}`}>
+                        {isWorktreeSession ? (
+                            <span
+                                data-testid="session-worktree-indicator"
+                                role="img"
+                                aria-label={t('session.item.worktree.tooltip')}
+                                title={t('session.item.worktree.tooltip')}
+                                className="inline-flex shrink-0 text-[var(--app-link)]"
+                            >
+                                <GitBranchIcon className="h-3.5 w-3.5" />
+                            </span>
+                        ) : null}
+                        <div className={`min-w-0 flex-1 truncate text-sm font-medium ${sessionTitleColor}`}>
                             {sessionName}
                         </div>
                         {attention && (attention.kind === 'permission' || attention.kind === 'input') ? (
@@ -760,14 +771,11 @@ function SessionItem(props: {
                         </span>
                     </div>
                 </div>
-                {showPath || worktreeLabel ? (
+                {showPath && !isWorktreeSession ? (
                     <div
                         className="truncate text-xs text-[var(--app-hint)]"
-                        title={worktreeLabel
-                            ? s.metadata?.worktree?.worktreePath ?? s.metadata?.path
-                            : undefined}
                     >
-                        {worktreeLabel ?? s.metadata?.path ?? s.id}
+                        {s.metadata?.path ?? s.id}
                     </div>
                 ) : null}
             </button>
