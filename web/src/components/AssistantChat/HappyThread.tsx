@@ -32,7 +32,7 @@ type PendingScrollRestore = {
 const MESSAGE_ANCHOR_SELECTOR = '.happy-thread-messages > [id]'
 const AUTO_SCROLL_RESUME_THRESHOLD_PX = 120
 const MANUAL_SCROLL_EPSILON_PX = 1
-const SEND_SCROLL_TIMEOUT_MS = 1500
+const SEND_FOLLOWUP_SCROLL_DELAYS_MS = [50, 200, 500, 1000] as const
 const NEWER_PREFETCH_MARGIN_PX = 600
 
 type ScrollIntent = {
@@ -96,6 +96,39 @@ export function restoreScrollAnchor(viewport: HTMLElement, anchor: ScrollAnchor)
     const targetRect = target.getBoundingClientRect()
     viewport.scrollTop += targetRect.top - viewportRect.top - anchor.topOffset
     return true
+}
+
+/**
+ * Align a message to the top of the chat viewport without scrolling any
+ * ancestor outside that viewport. `scrollIntoView` is intentionally avoided:
+ * the page shell is also scrollable on non-Telegram browsers, so the browser
+ * can otherwise move `body` along with the chat.
+ */
+export function scrollViewportToStart(
+    viewport: HTMLElement,
+    target: HTMLElement,
+    behavior: ScrollBehavior = 'auto'
+): boolean {
+    if (!viewport.contains(target)) {
+        return false
+    }
+    const viewportRect = viewport.getBoundingClientRect()
+    const targetRect = target.getBoundingClientRect()
+    viewport.scrollTo({
+        top: viewport.scrollTop + targetRect.top - viewportRect.top,
+        behavior
+    })
+    return true
+}
+
+export function scrollViewportToBottom(
+    viewport: HTMLElement,
+    behavior: ScrollBehavior = 'auto'
+): void {
+    viewport.scrollTo({
+        top: viewport.scrollHeight,
+        behavior
+    })
 }
 
 export function getRenderedMessageIds(viewport: HTMLElement): Set<string> {
@@ -325,8 +358,6 @@ export function HappyThread(props: {
     outlineItems: readonly ConversationOutlineItem[]
     onOutlineOpenChange: (open: boolean) => void
     onOutlineItemClick?: (item: ConversationOutlineItem) => void
-    findLatestUserMessageId: () => string | null
-    sendScrollPreviousMessageId: string | null
     /** Located window has messages beyond it — show a "load newer" affordance. */
     hasNewer: boolean
     /** Page forward from the located window toward the latest messages. */
@@ -362,13 +393,11 @@ export function HappyThread(props: {
     const forceScrollTokenRef = useRef(props.forceScrollToken)
     const lastScrollTopRef = useRef(0)
     const initialLatestPositionPendingRef = useRef(true)
-    const pendingSendScrollRef = useRef<{ deadline: number; previousMessageId: string | null } | null>(null)
     const pendingContinueRef = useRef<{ previousIds: Set<string>; baselineVersion: number } | null>(null)
     const pendingNewerAnchorRef = useRef<ScrollAnchor | null>(null)
     const newerLoadInFlightRef = useRef(false)
     const newerPrefetchArmedRef = useRef(true)
     const pendingCountRef = useRef(props.pendingCount)
-    const findLatestUserMessageIdRef = useRef(props.findLatestUserMessageId)
     pendingCountRef.current = props.pendingCount
     messagesVersionRef.current = props.messagesVersion
 
@@ -392,10 +421,6 @@ export function HappyThread(props: {
     useEffect(() => {
         onLoadMoreRef.current = props.onLoadMore
     }, [props.onLoadMore])
-    useEffect(() => {
-        findLatestUserMessageIdRef.current = props.findLatestUserMessageId
-    }, [props.findLatestUserMessageId])
-
     const settlePendingLoad = useCallback((result: boolean) => {
         const resolve = pendingLoadResolveRef.current
         const baseline = pendingLoadBaselineRef.current
@@ -447,6 +472,20 @@ export function HappyThread(props: {
         setAutoScrollMode(intent.isNearBottom)
         setAtBottomMode(intent.isNearBottom)
     }, [setAutoScrollMode, setAtBottomMode])
+
+    const scrollToBottom = useCallback(() => {
+        const viewport = viewportRef.current
+        if (!viewport) return
+
+        scrollViewportToBottom(viewport, 'smooth')
+        lastScrollTopRef.current = viewport.scrollTop
+        autoScrollEnabledRef.current = true
+        if (!atBottomRef.current) {
+            atBottomRef.current = true
+            onAtBottomChangeRef.current(true)
+        }
+        onFlushPendingRef.current()
+    }, [])
 
     // Track scroll position to toggle autoScroll (stable listener using refs)
     useEffect(() => {
@@ -545,40 +584,17 @@ export function HappyThread(props: {
         return true
     }, [router, scrollRestorationId, setAtBottomMode, setAutoScrollMode])
 
-    const scrollToSentMessage = useCallback((): boolean => {
-        const pending = pendingSendScrollRef.current
-        const viewport = viewportRef.current
-        if (!pending || !viewport) return false
-        if (Date.now() > pending.deadline) {
-            pendingSendScrollRef.current = null
-            return false
-        }
-        const messageId = findLatestUserMessageIdRef.current()
-        if (!messageId || messageId === pending.previousMessageId) return false
-        const target = document.getElementById(getConversationMessageAnchorId(messageId))
-        if (!target || !viewport.contains(target)) return false
-
-        target.scrollIntoView({ block: 'start', behavior: 'smooth' })
-        lastScrollTopRef.current = viewport.scrollTop
-        positionSettledRef.current = true
-        pendingContinueRef.current = null
-        pendingSendScrollRef.current = null
-        autoScrollEnabledRef.current = false
-        setAtBottomMode(false)
-        return true
-    }, [setAtBottomMode])
-
     useEffect(() => {
         if (forceScrollTokenRef.current === props.forceScrollToken) return
         forceScrollTokenRef.current = props.forceScrollToken
         pendingContinueRef.current = null
-        pendingSendScrollRef.current = {
-            deadline: Date.now() + SEND_SCROLL_TIMEOUT_MS,
-            previousMessageId: props.sendScrollPreviousMessageId
-        }
-        const timers = [0, 50, 200, 500, 1000].map((delay) => window.setTimeout(scrollToSentMessage, delay))
+        // The user send is an explicit jump to the latest conversation state.
+        // Re-run the viewport-only scroll after delayed optimistic/SSE rows
+        // commit, but never use `scrollIntoView` on the message element.
+        scrollToBottom()
+        const timers = SEND_FOLLOWUP_SCROLL_DELAYS_MS.map((delay) => window.setTimeout(scrollToBottom, delay))
         return () => timers.forEach((timer) => window.clearTimeout(timer))
-    }, [props.forceScrollToken, props.sendScrollPreviousMessageId, scrollToSentMessage])
+    }, [props.forceScrollToken, scrollToBottom])
 
     const loadOlderPreservingScroll = useCallback((): Promise<boolean> => {
         if (pendingLoadPromiseRef.current) {
@@ -645,7 +661,7 @@ export function HappyThread(props: {
         pendingContinueRef.current = null
         const target = findFirstNewRenderedMessage(viewport, pending.previousIds)
         if (!target) return false
-        target.scrollIntoView({ block: 'start' })
+        if (!scrollViewportToStart(viewport, target)) return false
         pendingNewerAnchorRef.current = null
         lastScrollTopRef.current = viewport.scrollTop
         autoScrollEnabledRef.current = false
@@ -698,7 +714,7 @@ export function HappyThread(props: {
         if (!viewport) return
         const alreadyRendered = findFirstMessageAfterViewport(viewport)
         if (alreadyRendered) {
-            alreadyRendered.scrollIntoView({ block: 'start' })
+            scrollViewportToStart(viewport, alreadyRendered)
             positionSettledRef.current = true
             autoScrollEnabledRef.current = false
             setAtBottomMode(false)
@@ -753,8 +769,9 @@ export function HappyThread(props: {
             hasMoreMessages: () => hasMoreMessagesRef.current,
             loadOlderPreservingScroll
         })
-        if (target) {
-            target.scrollIntoView({ block: 'start', behavior: 'smooth' })
+        const viewport = viewportRef.current
+        if (target && viewport) {
+            scrollViewportToStart(viewport, target, 'smooth')
             autoScrollEnabledRef.current = false
         }
         props.onOutlineItemClick?.(item)
@@ -771,7 +788,6 @@ export function HappyThread(props: {
             if (pendingScrollRef.current) {
                 return
             }
-            if (scrollToSentMessage()) return
             if (restoreInitialLatestPosition()) return
             if (finishContinueReading()) return
             if (restoreNewerLoadAnchor()) return
@@ -779,7 +795,7 @@ export function HappyThread(props: {
         })
         observer.observe(content)
         return () => observer.disconnect()
-    }, [finishContinueReading, loadOlderPreservingScroll, recomputeAtBottom, restoreInitialLatestPosition, restoreNewerLoadAnchor, scrollToSentMessage])
+    }, [finishContinueReading, loadOlderPreservingScroll, recomputeAtBottom, restoreInitialLatestPosition, restoreNewerLoadAnchor])
 
     useLayoutEffect(() => {
         const pending = pendingScrollRef.current
@@ -799,12 +815,11 @@ export function HappyThread(props: {
             settlePendingLoad(true)
             return
         }
-        if (scrollToSentMessage()) return
         if (restoreInitialLatestPosition()) return
         if (finishContinueReading()) return
         if (restoreNewerLoadAnchor()) return
         recomputeAtBottom()
-    }, [props.messagesVersion, finishContinueReading, loadOlderPreservingScroll, recomputeAtBottom, restoreInitialLatestPosition, restoreNewerLoadAnchor, scrollToSentMessage, settlePendingLoad])
+    }, [props.messagesVersion, finishContinueReading, loadOlderPreservingScroll, recomputeAtBottom, restoreInitialLatestPosition, restoreNewerLoadAnchor, settlePendingLoad])
 
     useEffect(() => {
         isLoadingMoreRef.current = props.isLoadingMoreMessages

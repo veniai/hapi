@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, renderHook } from '@testing-library/react'
+import { getPageScrollTop, resetPageScroll } from './useViewportHeight'
+import { useViewportHeight } from './useViewportHeight'
 
 /**
  * Unit tests for the useViewportHeight hook logic.
@@ -15,6 +18,9 @@ describe('useViewportHeight update logic', () => {
 
     afterEach(() => {
         root.style.removeProperty('--app-viewport-height')
+        document.documentElement.scrollTop = 0
+        document.body.scrollTop = 0
+        Object.defineProperty(window, 'scrollY', { value: 0, configurable: true })
     })
 
     it('sets --app-viewport-height when visual viewport is smaller than window', () => {
@@ -101,6 +107,62 @@ describe('useViewportHeight update logic', () => {
 
         expect(scrollToSpy).not.toHaveBeenCalled()
 
+        scrollToSpy.mockRestore()
+    })
+
+    it('detects body scroll when window.scrollY stays zero', () => {
+        Object.defineProperty(window, 'scrollY', { value: 0, configurable: true })
+        document.documentElement.scrollTop = 0
+        document.body.scrollTop = 120
+
+        expect(getPageScrollTop()).toBe(120)
+    })
+
+    it('resets both possible outer page scroll containers', () => {
+        const scrollToSpy = vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
+        document.documentElement.scrollTop = 30
+        document.body.scrollTop = 120
+
+        resetPageScroll()
+
+        expect(scrollToSpy).toHaveBeenCalledWith(0, 0)
+        expect(document.documentElement.scrollTop).toBe(0)
+        expect(document.body.scrollTop).toBe(0)
+        scrollToSpy.mockRestore()
+    })
+
+    it('clears the keyboard viewport and body scroll when the keyboard closes', async () => {
+        const scrollToSpy = vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
+        let viewportHeight = 800
+        const viewport = new EventTarget()
+        Object.defineProperty(viewport, 'height', {
+            configurable: true,
+            get: () => viewportHeight
+        })
+        Object.defineProperty(window, 'visualViewport', {
+            configurable: true,
+            value: viewport
+        })
+        Object.defineProperty(window, 'innerHeight', { configurable: true, value: 800 })
+
+        const { unmount } = renderHook(() => useViewportHeight())
+
+        viewportHeight = 400
+        await act(async () => {
+            viewport.dispatchEvent(new Event('resize'))
+        })
+        expect(root.style.getPropertyValue('--app-viewport-height')).toBe('400px')
+
+        document.body.scrollTop = 80
+        viewportHeight = 800
+        await act(async () => {
+            window.dispatchEvent(new Event('resize'))
+        })
+        expect(root.style.getPropertyValue('--app-viewport-height')).toBe('')
+        expect(document.body.scrollTop).toBe(0)
+
+        unmount()
+        Object.defineProperty(window, 'visualViewport', { configurable: true, value: undefined })
         scrollToSpy.mockRestore()
     })
 })

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>HAPI chat scroll fixture</title>
+        <style>
+            * { box-sizing: border-box; }
+            html, body { margin: 0; height: 800px; overflow-y: auto; }
+            body { background: #dbeafe; }
+            #root { height: 760px; }
+            #outer-tail { height: 200px; background: #bfdbfe; }
+            .chat-app { display: flex; height: 100%; flex-direction: column; background: #fff; }
+            .chat-header { height: 60px; flex: none; background: #fed7aa; }
+            .chat-drag-zone,
+            .chat-thread { display: flex; min-height: 0; flex: 1; flex-direction: column; }
+            .chat-viewport { min-height: 0; flex: 1; overflow-y: auto; }
+            .chat-content { min-height: 1600px; padding: 12px; }
+            .chat-target { height: 80px; margin-top: 1400px; background: #fecaca; }
+            .chat-composer { height: 100px; flex: none; background: #fef08a; }
+        </style>
+    </head>
+    <body>
+        <div id="root"></div>
+        <div id="outer-tail" aria-hidden="true"></div>
+        <script type="module" src="/e2e-fixtures/chat-scroll-fixture.tsx"></script>
+    </body>
+</html>
