@@ -11,6 +11,8 @@ import {
     getScrollIntent,
     locateOutlineTargetMessage,
     restoreScrollAnchor,
+    scrollViewportToBottom,
+    scrollViewportToStart,
     shouldRestoreInitialLatest,
 } from '@/components/AssistantChat/HappyThread'
 import type { ConversationOutlineItem } from '@/chat/outline'
@@ -217,6 +219,49 @@ describe('scroll anchor helpers', () => {
         expect(viewport.scrollTop).toBe(250)
 
         viewport.remove()
+    })
+
+    it('aligns a message by scrolling only the chat viewport', () => {
+        const viewport = document.createElement('div')
+        const target = document.createElement('div')
+        const scrollTo = vi.fn()
+        const scrollIntoView = vi.fn()
+        viewport.append(target)
+        document.body.append(viewport)
+        viewport.scrollTop = 200
+
+        Object.defineProperty(viewport, 'scrollTo', { configurable: true, value: scrollTo })
+        Object.defineProperty(target, 'scrollIntoView', { configurable: true, value: scrollIntoView })
+        vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue(rect({ top: 100, bottom: 500 }))
+        vi.spyOn(target, 'getBoundingClientRect').mockReturnValue(rect({ top: 180, bottom: 260 }))
+
+        expect(scrollViewportToStart(viewport, target, 'smooth')).toBe(true)
+        expect(scrollTo).toHaveBeenCalledWith({ top: 280, behavior: 'smooth' })
+        expect(scrollIntoView).not.toHaveBeenCalled()
+
+        viewport.remove()
+    })
+
+    it('does not scroll when the target is outside the chat viewport', () => {
+        const viewport = document.createElement('div')
+        const target = document.createElement('div')
+        const scrollTo = vi.fn()
+        Object.defineProperty(viewport, 'scrollTo', { configurable: true, value: scrollTo })
+        Object.defineProperty(viewport, 'getBoundingClientRect', { configurable: true, value: () => rect({ top: 0, bottom: 500 }) })
+
+        expect(scrollViewportToStart(viewport, target)).toBe(false)
+        expect(scrollTo).not.toHaveBeenCalled()
+    })
+
+    it('scrolls only the chat viewport to the latest content', () => {
+        const viewport = document.createElement('div')
+        const scrollTo = vi.fn()
+        Object.defineProperty(viewport, 'scrollHeight', { configurable: true, value: 1200 })
+        Object.defineProperty(viewport, 'scrollTo', { configurable: true, value: scrollTo })
+
+        scrollViewportToBottom(viewport, 'smooth')
+
+        expect(scrollTo).toHaveBeenCalledWith({ top: 1200, behavior: 'smooth' })
     })
 
     it('continues to the first already-rendered message below the viewport', () => {

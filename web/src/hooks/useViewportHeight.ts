@@ -1,6 +1,22 @@
 import { useEffect } from 'react'
 import { isTelegramApp } from '@/hooks/useTelegram'
 
+export function getPageScrollTop(): number {
+    return Math.max(
+        window.scrollY,
+        document.documentElement.scrollTop,
+        document.body?.scrollTop ?? 0
+    )
+}
+
+export function resetPageScroll(): void {
+    window.scrollTo(0, 0)
+    document.documentElement.scrollTop = 0
+    if (document.body) {
+        document.body.scrollTop = 0
+    }
+}
+
 /**
  * Sets a CSS custom property `--app-viewport-height` on <html> that tracks the
  * visual viewport height. This is a fallback for browsers that do not support
@@ -23,6 +39,7 @@ export function useViewportHeight(): void {
         if (!viewport) return
 
         const root = document.documentElement
+        let keyboardWasOpen = false
 
         function update() {
             if (!viewport) return
@@ -31,6 +48,7 @@ export function useViewportHeight(): void {
             // false positives from sub-pixel rounding.
             const diff = window.innerHeight - viewport.height
             if (diff > 1) {
+                keyboardWasOpen = true
                 root.style.setProperty('--app-viewport-height', `${viewport.height}px`)
                 // On iOS PWA (black-translucent status bar + viewport-fit=cover),
                 // the browser scrolls the page upward when the keyboard opens to
@@ -38,20 +56,27 @@ export function useViewportHeight(): void {
                 // the iOS status bar. Reset the page scroll so the app stays
                 // pinned to the top — the inner flex layout already handles
                 // keeping the composer visible.
-                if (window.scrollY > 0) {
-                    window.scrollTo(0, 0)
+                if (getPageScrollTop() > 0) {
+                    resetPageScroll()
                 }
             } else {
                 root.style.removeProperty('--app-viewport-height')
+                if (keyboardWasOpen && getPageScrollTop() > 0) {
+                    resetPageScroll()
+                }
+                keyboardWasOpen = false
             }
         }
 
+        update()
         viewport.addEventListener('resize', update)
         viewport.addEventListener('scroll', update)
+        window.addEventListener('resize', update)
 
         return () => {
             viewport.removeEventListener('resize', update)
             viewport.removeEventListener('scroll', update)
+            window.removeEventListener('resize', update)
             root.style.removeProperty('--app-viewport-height')
         }
     }, [])
