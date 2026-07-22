@@ -415,6 +415,7 @@ export default function FilesPage() {
         navigate({
             to: '/sessions/$sessionId',
             params: { sessionId },
+            replace: true,
         })
     }, [navigate, sessionId])
 
@@ -423,6 +424,7 @@ export default function FilesPage() {
             to: '/sessions/$sessionId',
             params: { sessionId },
             search: { outline: true },
+            replace: true,
         })
     }, [navigate, sessionId])
 

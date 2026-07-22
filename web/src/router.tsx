@@ -13,6 +13,7 @@ import {
     useSearch,
 } from '@tanstack/react-router'
 import { getScrollRestorationKey } from '@/lib/scrollRestorationKey'
+import { isSessionsIndexPath } from '@/lib/sessionPath'
 import { App } from '@/App'
 import { SessionChat } from '@/components/SessionChat'
 import { SessionList } from '@/components/SessionList'
@@ -291,7 +292,7 @@ function SessionsPage() {
         ?? selectedSession?.metadata?.worktree?.basePath
         ?? selectedSession?.metadata?.path
         ?? null
-    const isSessionsIndex = pathname === '/sessions' || pathname === '/sessions/'
+    const isSessionsIndex = isSessionsIndexPath(pathname)
     const sidebar = useSidebarResize()
     const handleNewSessionInDirectory = useCallback((args: { machineId: string | null; directory: string }) => {
         navigate({
@@ -409,7 +410,8 @@ function SessionsPage() {
             if (redirectTarget?.canonicalSessionId) {
                 navigate({
                     to: '/sessions/$sessionId',
-                    params: { sessionId: redirectTarget.canonicalSessionId }
+                    params: { sessionId: redirectTarget.canonicalSessionId },
+                    replace: true,
                 })
             }
         } catch (error) {
@@ -633,6 +635,7 @@ function SessionsPage() {
                         onSelect={(sessionId) => navigate({
                             to: '/sessions/$sessionId',
                             params: { sessionId },
+                            replace: !isSessionsIndex,
                         })}
                         onNewSession={() => navigate({ to: '/sessions/new' })}
                         onNewSessionInDirectory={handleNewSessionInDirectory}
