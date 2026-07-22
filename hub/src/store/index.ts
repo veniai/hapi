@@ -23,11 +23,12 @@ export { PushStore } from './pushStore'
 export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
 
-const SCHEMA_VERSION: number = 13
+const SCHEMA_VERSION: number = 14
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
     'messages',
+    'messages_fts',
     'users',
     'push_subscriptions'
 ] as const
@@ -127,6 +128,7 @@ export class Store {
             10: () => this.migrateFromV10ToV11(),
             11: () => this.migrateFromV11ToV12(),
             12: () => this.migrateFromV12ToV13(),
+            13: () => this.migrateFromV13ToV14(),
         })
 
         if (currentVersion === 0) {
@@ -235,6 +237,25 @@ export class Store {
             CREATE INDEX IF NOT EXISTS idx_messages_scheduled_pending
                 ON messages(scheduled_at)
                 WHERE scheduled_at IS NOT NULL AND invoked_at IS NULL;
+
+            -- Full-text search over messages.content (multi-agent-blackboard #3).
+            -- external-content FTS5 keyed by the implicit rowid: messages.id is
+            -- UUID TEXT and cannot serve as content_rowid. Triggers keep the index
+            -- in sync; CASCADE session deletes fire AFTER DELETE on messages so
+            -- the FTS index is cleaned automatically. See impl doc ①.
+            CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+                content, content='messages', content_rowid='rowid'
+            );
+            CREATE TRIGGER IF NOT EXISTS messages_fts_ai AFTER INSERT ON messages BEGIN
+                INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content);
+            END;
+            CREATE TRIGGER IF NOT EXISTS messages_fts_ad AFTER DELETE ON messages BEGIN
+                INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.rowid, old.content);
+            END;
+            CREATE TRIGGER IF NOT EXISTS messages_fts_au AFTER UPDATE ON messages WHEN new.content IS NOT old.content BEGIN
+                INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.rowid, old.content);
+                INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content);
+            END;
 
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -485,6 +506,39 @@ export class Store {
         if (columns.has('last_read_at')) {
             this.db.exec('ALTER TABLE sessions DROP COLUMN last_read_at')
         }
+    }
+
+    // V13 → V14: FTS5 full-text index over messages.content for sibling-session
+    // search (multi-agent-blackboard #3). external-content FTS5 keyed by the
+    // implicit rowid (messages.id is UUID TEXT). Atomic: virtual table + triggers
+    // + backfill rebuild run in one transaction, so a failure leaves no half-built
+    // index and user_version stays 13. Idempotent: sqlite_master guard makes
+    // re-runs a no-op. See doc/spec/multi-agent-blackboard-v1.1-impl.md ①.
+    private migrateFromV13ToV14(): void {
+        const exists = this.db.prepare(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='messages_fts'"
+        ).get() as { name: string } | undefined
+        if (exists) return
+        const tx = this.db.transaction(() => {
+            this.db.exec(`
+                CREATE VIRTUAL TABLE messages_fts USING fts5(
+                    content, content='messages', content_rowid='rowid'
+                );
+                CREATE TRIGGER messages_fts_ai AFTER INSERT ON messages BEGIN
+                    INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content);
+                END;
+                CREATE TRIGGER messages_fts_ad AFTER DELETE ON messages BEGIN
+                    INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.rowid, old.content);
+                END;
+                CREATE TRIGGER messages_fts_au AFTER UPDATE ON messages WHEN new.content IS NOT old.content BEGIN
+                    INSERT INTO messages_fts(messages_fts, rowid, content) VALUES('delete', old.rowid, old.content);
+                    INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content);
+                END;
+            `)
+            // Backfill the index from existing messages (no-op on an empty v13 DB).
+            this.db.exec("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')")
+        })
+        tx()
     }
 
     private getSessionColumnNames(): Set<string> {

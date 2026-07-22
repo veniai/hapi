@@ -223,6 +223,11 @@ export class ApiSessionClient extends EventEmitter {
     readonly sessionId: string
     private metadata: Metadata | null
     private metadataVersion: number
+
+    /** Hub bearer token (for MCP tools that call hub REST, e.g. search_sibling). */
+    getToken(): string {
+        return this.token
+    }
     private agentState: AgentState | null
     private agentStateVersion: number
     private readonly socket: Socket<ServerToClientEvents, ClientToServerEvents>

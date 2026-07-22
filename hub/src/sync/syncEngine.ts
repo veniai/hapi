@@ -263,6 +263,11 @@ export class SyncEngine {
         return this.sessionCache.getSessionsByNamespace(namespace)
     }
 
+    /** Full-text search over message content, scoped to namespace + path (multi-agent-blackboard #3). */
+    searchMessages(namespace: string, path: string, query: string, limit: number = 20) {
+        return this.store.messages.searchMessages(namespace, path, query, limit)
+    }
+
     getFutureScheduledMessageCounts(sessionIds: string[], now: number = Date.now()): Map<string, number> {
         return this.store.messages.countFutureScheduledBySessionIds(sessionIds, now)
     }
