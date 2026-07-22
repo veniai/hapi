@@ -69,6 +69,23 @@ describe('SDKToLogConverter', () => {
             expect(logMessage?.type).toBe('user')
             expect((logMessage as any).message.content).toHaveLength(2)
         })
+
+        it.each([
+            [{ isMeta: true }, { isMeta: true }],
+            [{ isSynthetic: true }, { isMeta: true }],
+            [{ isCompactSummary: true }, { isCompactSummary: true }]
+        ])('should normalize remote internal message flags', (sdkFlags, expectedFlags) => {
+            const logMessage = converter.convert({
+                type: 'user',
+                ...sdkFlags,
+                message: {
+                    role: 'user',
+                    content: [{ type: 'text', text: 'internal context' }]
+                }
+            } as SDKUserMessage)
+
+            expect(logMessage).toMatchObject(expectedFlags)
+        })
     })
 
     describe('Assistant messages', () => {
