@@ -14,7 +14,7 @@ export function useSessionActions(
     codexCollaborationModeSupported?: boolean
 ): {
     abortSession: () => Promise<void>
-    archiveSession: () => Promise<void>
+    archiveSession: (force?: boolean) => Promise<void>
     reopenSession: () => Promise<ReopenSessionResponse>
     switchSession: () => Promise<void>
     setPermissionMode: (mode: PermissionMode) => Promise<void>
@@ -82,11 +82,11 @@ export function useSessionActions(
     })
 
     const archiveMutation = useMutation({
-        mutationFn: async () => {
+        mutationFn: async (force: boolean) => {
             if (!api || !sessionId) {
                 throw new Error('Session unavailable')
             }
-            await api.archiveSession(sessionId)
+            await api.archiveSession(sessionId, { force })
         },
         onSuccess: () => void invalidateSession(),
     })
@@ -229,7 +229,7 @@ export function useSessionActions(
 
     return {
         abortSession: abortMutation.mutateAsync,
-        archiveSession: archiveMutation.mutateAsync,
+        archiveSession: (force = false) => archiveMutation.mutateAsync(force),
         reopenSession: reopenMutation.mutateAsync,
         switchSession: switchMutation.mutateAsync,
         setPermissionMode: permissionMutation.mutateAsync,

@@ -101,7 +101,12 @@ export type CursorChatStoreStatusResult =
 export class WorktreeArchiveBlockedError extends Error {
     constructor(
         readonly code: WorktreeArchiveBlockerCode,
-        message: string
+        message: string,
+        readonly forceMode: 'cleanup' | 'archive-only' = (
+            code === 'dirty_worktree' || code === 'unmerged_commits' || code === 'session_busy'
+                ? 'cleanup'
+                : 'archive-only'
+        )
     ) {
         super(message)
         this.name = 'WorktreeArchiveBlockedError'
@@ -622,18 +627,36 @@ export class SyncEngine {
         this.handleSessionEnd({ sid: sessionId, time: Date.now() })
     }
 
-    async archiveWorktreeSession(sessionId: string): Promise<void> {
+    async archiveWorktreeSession(sessionId: string, options: { force?: boolean } = {}): Promise<void> {
+        const force = options.force === true
         const initial = this.sessionCache.getSession(sessionId) ?? this.sessionCache.refreshSession(sessionId)
         if (!initial?.metadata) {
+            if (force) {
+                await this.archiveSession(sessionId)
+                return
+            }
             throw new WorktreeArchiveBlockedError('worktree_unverified', 'Worktree metadata is unavailable.')
         }
-        if (initial.active && (initial.thinking || (initial.backgroundTaskCount ?? 0) > 0)) {
+        if (!force && initial.active && (initial.thinking || (initial.backgroundTaskCount ?? 0) > 0)) {
             throw new WorktreeArchiveBlockedError('session_busy', 'Session is still working. Wait for it to become idle before archiving.')
         }
 
-        const request = this.buildWorktreeArchiveRequest(initial)
+        let request: WorktreeArchiveRequest
+        try {
+            request = this.buildWorktreeArchiveRequest(initial)
+        } catch (error) {
+            if (force) {
+                await this.archiveSession(sessionId)
+                return
+            }
+            throw error
+        }
         const machineId = initial.metadata.machineId
         if (!machineId) {
+            if (force) {
+                await this.archiveSession(sessionId)
+                return
+            }
             throw new WorktreeArchiveBlockedError('machine_offline', 'Session machine is unavailable.')
         }
 
@@ -641,10 +664,27 @@ export class SyncEngine {
         try {
             inspection = await this.rpcGateway.inspectWorktreeArchive(machineId, request)
         } catch (error) {
+            if (force) {
+                await this.archiveSession(sessionId)
+                return
+            }
             throw this.asWorktreeMachineError(error)
         }
+        let forceCleanup = false
         if (inspection.type === 'blocker') {
-            throw new WorktreeArchiveBlockedError(inspection.code, inspection.message)
+            if (!force) {
+                throw new WorktreeArchiveBlockedError(inspection.code, inspection.message)
+            }
+            if (inspection.code === 'dirty_worktree' || inspection.code === 'unmerged_commits') {
+                forceCleanup = true
+                request = { ...request, force: true }
+            } else {
+                // The runner could not prove a safe path or cleanup state. A
+                // force continuation archives the conversation but leaves the
+                // local worktree untouched rather than guessing.
+                await this.archiveSession(sessionId)
+                return
+            }
         }
 
         if (initial.active) {
@@ -652,23 +692,46 @@ export class SyncEngine {
                 await this.rpcGateway.prepareWorktreeArchive(sessionId)
             } catch (error) {
                 if (error instanceof RpcTargetMissingError) {
+                    if (force) {
+                        await this.archiveSession(sessionId)
+                        return
+                    }
                     throw new WorktreeArchiveBlockedError('machine_offline', 'Session runner is offline.')
+                }
+                if (force) {
+                    await this.archiveSession(sessionId)
+                    return
                 }
                 throw new WorktreeArchiveBlockedError('stop_failure', 'Session could not be stopped for worktree cleanup.')
             }
 
             if (!(await this.waitForSessionInactive(sessionId))) {
+                if (force) {
+                    await this.archiveSession(sessionId)
+                    return
+                }
                 throw new WorktreeArchiveBlockedError('stop_failure', 'Session did not stop in time; worktree was not removed.')
             }
         }
 
         let cleanup
         try {
-            cleanup = await this.rpcGateway.cleanupWorktreeArchive(machineId, request)
+            cleanup = await this.rpcGateway.cleanupWorktreeArchive(
+                machineId,
+                forceCleanup ? { ...request, force: true } : request
+            )
         } catch (error) {
+            if (force) {
+                await this.archiveSession(sessionId)
+                return
+            }
             throw this.asWorktreeMachineError(error)
         }
         if (cleanup.type === 'blocker') {
+            if (force) {
+                await this.archiveSession(sessionId)
+                return
+            }
             throw new WorktreeArchiveBlockedError(cleanup.code, cleanup.message)
         }
 

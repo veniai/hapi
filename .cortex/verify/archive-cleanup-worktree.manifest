@@ -21,9 +21,9 @@ expected_exit=0
 [cond:browser-archive-blockers]
 type=mcp
 target=playwright
-behavior=本地 Web 中归档 worktree session；dirty、未合并提交、runner 离线或归属异常时显示对应 blocker 且 session 不显示 archived；干净已合并时归档成功
-pass_criteria=四类 blocker 均显示可行动错误且 session 留在未归档状态；成功场景显示 archived
+behavior=本地 Web 中归档 worktree session；无 blocker 时不显示确认弹窗并直接归档；dirty、未合并提交、runner 离线或归属异常时才显示对应 blocker 及继续归档选择；取消不归档，继续按风险类型处理；干净已合并时归档成功
+pass_criteria=四类 blocker 首次均显示可行动错误且取消后 session 留在未归档状态；dirty/未合并继续后强制删除目录与分支；runner 离线/归属异常继续后只归档对话并保留目录；无 blocker 成功路径无确认弹窗且 session 显示 archived
 
 [cond:isolated-git-flow]
 type=human
-# 人审：在临时 Git repo 中确认成功归档后 worktree 与分支均不存在；失败场景目录和分支仍在；全程未使用 --force，也不操作既有项目 worktree。
+# 人审：在临时 Git repo 中确认正常路径无弹窗；dirty/未合并继续后目录与分支被明确强制删除；offline/unverified 继续后对话归档但目录仍在；全程不操作既有项目 worktree。

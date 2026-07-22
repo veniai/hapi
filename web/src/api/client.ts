@@ -44,6 +44,11 @@ import type {
     ReopenSessionResponse,
     UploadFileResponse
 } from '@hapi/protocol/apiTypes'
+import {
+    WorktreeArchiveBlockerCodeSchema,
+    type WorktreeArchiveBlockerCode,
+    type WorktreeArchiveForceMode
+} from '@hapi/protocol/apiTypes'
 import type { AgentFlavor } from '@hapi/protocol'
 import type { CancelMessageResponse } from '@hapi/protocol/schemas'
 
@@ -80,6 +85,17 @@ export class ApiError extends Error {
         this.status = status
         this.code = code
         this.body = body
+    }
+}
+
+export class ArchiveBlockerError extends Error {
+    constructor(
+        message: string,
+        readonly code: WorktreeArchiveBlockerCode,
+        readonly forceMode: WorktreeArchiveForceMode
+    ) {
+        super(message)
+        this.name = 'ArchiveBlockerError'
     }
 }
 
@@ -458,22 +474,38 @@ export class ApiClient {
         })
     }
 
-    async archiveSession(sessionId: string): Promise<void> {
+    async archiveSession(sessionId: string, options: { force?: boolean } = {}): Promise<void> {
         try {
             await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/archive`, {
                 method: 'POST',
-                body: JSON.stringify({})
+                body: JSON.stringify({ force: options.force === true })
             })
         } catch (error) {
             if (error instanceof ApiError && error.status === 409 && error.body) {
-                let blockerMessage: string | undefined
+                let blocker: { error?: unknown; code?: unknown; forceMode?: unknown } | null = null
                 try {
-                    const body = JSON.parse(error.body) as ErrorPayload
-                    blockerMessage = typeof body.error === 'string' ? body.error : undefined
+                    blocker = JSON.parse(error.body) as { message?: unknown; code?: unknown; forceMode?: unknown }
                 } catch {
                     // Keep the original API error when the response is not JSON.
                 }
-                if (blockerMessage) throw new Error(blockerMessage)
+                const parsedCode = WorktreeArchiveBlockerCodeSchema.safeParse(blocker?.code)
+                const forceMode: WorktreeArchiveForceMode | undefined = blocker?.forceMode === 'cleanup'
+                    || blocker?.forceMode === 'archive-only'
+                    ? blocker.forceMode
+                    : parsedCode.success
+                        ? parsedCode.data === 'dirty_worktree'
+                            || parsedCode.data === 'unmerged_commits'
+                            || parsedCode.data === 'session_busy'
+                            ? 'cleanup'
+                            : 'archive-only'
+                        : undefined
+                if (typeof blocker?.error === 'string' && parsedCode.success && forceMode) {
+                    throw new ArchiveBlockerError(
+                        blocker.error,
+                        parsedCode.data as WorktreeArchiveBlockerCode,
+                        forceMode
+                    )
+                }
             }
             throw error
         }

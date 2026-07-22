@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ApiClient, ApiError } from './client'
+import { ApiClient, ApiError, ArchiveBlockerError } from './client'
 
 describe('ApiClient error mapping', () => {
     let originalFetch: typeof globalThis.fetch
@@ -66,7 +66,24 @@ describe('ApiClient error mapping', () => {
         )
 
         const api = new ApiClient('test-token')
-        await expect(api.archiveSession('session-X')).rejects.toThrow('Worktree has uncommitted changes.')
+        await expect(api.archiveSession('session-X')).rejects.toMatchObject({
+            name: 'ArchiveBlockerError',
+            message: 'Worktree has uncommitted changes.',
+            code: 'dirty_worktree',
+            forceMode: 'cleanup'
+        } satisfies Partial<ArchiveBlockerError>)
+    })
+
+    it('sends force=true only for explicit archive continuation', async () => {
+        fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }))
+
+        const api = new ApiClient('test-token')
+        await api.archiveSession('session-X', { force: true })
+
+        expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+            method: 'POST',
+            body: JSON.stringify({ force: true })
+        })
     })
 
     it('passes the 422 missing-metadata body through unchanged so the UI can show the missing fields', async () => {

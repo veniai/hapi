@@ -186,6 +186,11 @@ export default {
   'dialog.archive.description': '确定要归档 "{name}" 吗？这将断开活动会话。',
   'dialog.archive.confirm': '归档',
   'dialog.archive.confirming': '归档中…',
+  'dialog.archive.blockedTitle': '归档需要处理问题',
+  'dialog.archive.failedTitle': '归档失败',
+  'dialog.archive.forceConfirm': '继续归档',
+  'dialog.archive.forceCleanupDescription': '继续会丢弃 worktree 中的本地修改或未合并提交，并删除 worktree 和分支。',
+  'dialog.archive.forceArchiveOnlyDescription': '继续会归档对话，但由于无法安全验证或清理，保留本地 worktree。',
 
   'dialog.reopen.errorTitle': '无法重新打开会话',
   'dialog.reopen.dismiss': '关闭',

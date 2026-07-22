@@ -303,7 +303,7 @@ async function verifyWorktreeArchiveTarget(target: WorktreeArchiveRequest): Prom
     }
 
     const status = (await runGit(['status', '--porcelain'], canonicalWorktree)).stdout;
-    if (status.trim()) {
+    if (status.trim() && !target.force) {
       return blocker('dirty_worktree', 'Worktree has uncommitted or untracked changes.');
     }
 
@@ -311,7 +311,7 @@ async function verifyWorktreeArchiveTarget(target: WorktreeArchiveRequest): Prom
       ['merge-base', '--is-ancestor', target.branch, target.baseRef],
       canonicalRepoRoot
     ).then(() => true).catch(() => false);
-    if (!branchMerged) {
+    if (!branchMerged && !target.force) {
       return blocker('unmerged_commits', 'Worktree branch still contains commits not merged into its creation base.');
     }
   } catch (error) {
@@ -341,8 +341,18 @@ export async function cleanupWorktreeArchive(target: WorktreeArchiveRequest): Pr
   }
 
   try {
-    await runGit(['worktree', 'remove', canonicalWorktree], canonicalBase);
-    await runGit(['branch', '-d', '--', target.branch], canonicalBase);
+    await runGit(
+      target.force
+        ? ['worktree', 'remove', '--force', canonicalWorktree]
+        : ['worktree', 'remove', canonicalWorktree],
+      canonicalBase
+    );
+    await runGit(
+      target.force
+        ? ['branch', '-D', '--', target.branch]
+        : ['branch', '-d', '--', target.branch],
+      canonicalBase
+    );
     return { type: 'success' };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

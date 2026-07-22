@@ -65,7 +65,7 @@ function createApp(session: Session, opts?: {
     getSessionExport?: (sessionId: string, session: Session) => unknown
     sessionExists?: boolean
     archiveSession?: (sessionId: string) => Promise<void>
-    archiveWorktreeSession?: (sessionId: string) => Promise<void>
+    archiveWorktreeSession?: (sessionId: string, options?: { force?: boolean }) => Promise<void>
     deleteSession?: (sessionId: string) => Promise<void>
     getCursorChatStoreStatus?: SyncEngine['getCursorChatStoreStatus']
 }) {
@@ -1204,9 +1204,44 @@ describe('sessions routes', () => {
             expect(response.status).toBe(409)
             expect(await response.json()).toEqual({
                 error: 'Worktree has uncommitted changes.',
-                code: 'dirty_worktree'
+                code: 'dirty_worktree',
+                forceMode: 'cleanup'
             })
             expect(normalArchiveCalled).toBe(false)
+        })
+
+        it('passes force=true only for the explicit continuation request', async () => {
+            const calls: boolean[] = []
+            const session = createSession({
+                metadata: {
+                    path: '/tmp/project-worktree',
+                    host: 'localhost',
+                    flavor: 'codex',
+                    worktree: {
+                        basePath: '/tmp/project',
+                        worktreePath: '/tmp/project-worktree',
+                        branch: 'hapi-test',
+                        name: 'test',
+                        managedByHapi: true,
+                        baseRef: 'main',
+                        baseCommit: 'abc123'
+                    }
+                }
+            })
+            const { app } = createApp(session, {
+                archiveWorktreeSession: async (_sessionId, options) => {
+                    calls.push(options?.force === true)
+                }
+            })
+
+            const response = await app.request('/api/sessions/session-1/archive', {
+                method: 'POST',
+                body: JSON.stringify({ force: true }),
+                headers: { 'content-type': 'application/json' }
+            })
+
+            expect(response.status).toBe(200)
+            expect(calls).toEqual([true])
         })
 
         it('returns 2xx and skips archiveSession when the row is already archived (idempotent)', async () => {
