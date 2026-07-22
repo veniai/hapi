@@ -7,6 +7,29 @@ import { requireSessionFromParam, requireSyncEngine } from './guards'
 export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
+    app.get('/search', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+        // namespace comes from the authenticated caller, never from client input
+        // (IDOR guard). path/q/limit are caller-supplied.
+        const namespace = c.get('namespace')
+        const q = (c.req.query('q') ?? '').trim()
+        const path = (c.req.query('path') ?? '').trim()
+        const limit = Math.min(parseInt(c.req.query('limit') ?? '20', 10) || 20, 50)
+        if (!q || !path) {
+            return c.json({ error: 'q and path are required' }, 400)
+        }
+        try {
+            const hits = engine.searchMessages(namespace, path, q, limit)
+            return c.json({ hits })
+        } catch {
+            // FTS5 MATCH syntax error (e.g. unescaped special chars) → empty, not 500.
+            return c.json({ hits: [] })
+        }
+    })
+
     app.get('/sessions/:id/messages', async (c) => {
         const engine = requireSyncEngine(c, getSyncEngine)
         if (engine instanceof Response) {

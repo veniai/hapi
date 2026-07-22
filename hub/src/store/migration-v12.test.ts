@@ -12,7 +12,7 @@ describe('migration v11 → v12 (attention_rev + handled_rev)', () => {
         expect(columns).toContain('attention_rev')
         expect(columns).toContain('handled_rev')
         const uv = (store['db'].prepare('PRAGMA user_version').get() as { user_version: number }).user_version
-        expect(uv).toBe(13)
+        expect(uv).toBe(14)
         store.close()
     })
 
@@ -48,7 +48,7 @@ describe('migration v11 → v12 (attention_rev + handled_rev)', () => {
             expect(att!.notnull).toBe(1)
             expect(hnd!.notnull).toBe(1)
             const uv = (store['db'].prepare('PRAGMA user_version').get() as { user_version: number }).user_version
-            expect(uv).toBe(13)
+            expect(uv).toBe(14)
         } finally {
             store?.close()
             rmSync(dir, { recursive: true, force: true })

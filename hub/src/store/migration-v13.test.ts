@@ -19,7 +19,7 @@ describe('migration v12 → v13 (drop last_read_message_id + last_read_at)', () 
         expect(cols).not.toContain('last_read_message_id')
         expect(cols).not.toContain('last_read_at')
         const uv = (store['db'].prepare('PRAGMA user_version').get() as { user_version: number }).user_version
-        expect(uv).toBe(13)
+        expect(uv).toBe(14)
         store.close()
     })
 
@@ -30,7 +30,7 @@ describe('migration v12 → v13 (drop last_read_message_id + last_read_at)', () 
             expect(cols).not.toContain('last_read_message_id')
             expect(cols).not.toContain('last_read_at')
             const uv = (store['db'].prepare('PRAGMA user_version').get() as { user_version: number }).user_version
-            expect(uv).toBe(13)
+            expect(uv).toBe(14)
         } finally {
             store.close()
             rmSync(dir, { recursive: true, force: true })

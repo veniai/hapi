@@ -28,6 +28,7 @@ import {
     type LookupQueuedMessageResult,
     type LocalMessageState,
 } from './messages'
+import { searchMessages as searchMessagesFn, type SearchHit } from './searchMessages'
 
 export class MessageStore {
     private readonly db: Database
@@ -38,6 +39,11 @@ export class MessageStore {
 
     addMessage(sessionId: string, content: unknown, localId?: string, scheduledAt?: number | null): StoredMessage {
         return addMessage(this.db, sessionId, content, localId, scheduledAt)
+    }
+
+    /** Full-text search over message content (multi-agent-blackboard #3). */
+    searchMessages(namespace: string, path: string, query: string, limit: number = 20): SearchHit[] {
+        return searchMessagesFn(this.db, namespace, path, query, limit)
     }
 
     copyMessageToSession(

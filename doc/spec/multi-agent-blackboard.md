@@ -54,6 +54,62 @@
 
 ---
 
+## 决策更新（2026-07-21 · 落地核实 + skill 路径修正）
+
+> 状态：CLI/hub 代码走查 + FTS5 实跑完成，**代码尚未改动**。修正 v1.1 落地路径，记录 `acfc8a8`（2026-07-20）对 v1.2 的影响。**待 Codex 复审**（重点见末）。
+
+### A. acfc8a8 与 v1.2 worker 候选集（经走查修正）
+
+`acfc8a8`（2026-07-20）移除"往 remote agent 首条 user 消息 prepend `SKILL_LOOKUP_INSTRUCTION`"——Cursor ACP 把这段当 prompt injection 拦了。
+
+**经走查（Codex 点 4）：acfc8a8 只证明"偷偷 prepend discovery 指令"有问题，不证明"worker 正常任务消息不能写成讨论者指令"**——后者本就是 user task，不是夹带 discovery。现状：`runAgentSession.ts:183` 现只发 `batch.message`；ACP `session/new` 只传 `cwd`+`mcpServers`、无 system 字段（`AcpSdkBackend.ts:284`）。
+
+**修正后的 worker 选型（不靠 acfc8a8 推导）**：取决两个独立条件——① 正常首条任务能否稳定遵循 panel 格式；② runner 能否**机械限制工具/写权限**。**只读安全不能靠 system prompt**——无真实 capability 强制，Claude/Codex 同样不安全。Claude/Codex 作 v1.2 **首发**（已有可控专属通道：`--append-system-prompt` / developer_instructions），理由是"通道可控可测"而非"acfc8a8 禁了 Kimi"。Kimi/Cursor 标"暂未验证/暂不首发"，不是"不能接"。原"优先异构（Claude+Kimi）"作废（v1.2 节旧句同步标记失效，见下）。
+
+### B. 搜索 #3 落地核实（FTS5 实跑 · 方案已修正）
+
+bun:sqlite 支持 FTS5（SQLite 3.53.0）。**经 Codex 复审 + 实跑裁决（`/tmp/hapi-blobs/fts5-probe.ts`，7 项）：之前"触发器不可用、必须 contentless + 应用层双写"的结论错了。** 实跑证明：
+- ✅ **external-content FTS5（`content='messages', content_rowid='id'`）+ 标准 AFTER INSERT/UPDATE/DELETE trigger 全通**（最干净，自动同步 + 天然事务原子）；
+- ✅ external-content 可 `rebuild`（清理悬挂 rowid）；
+- ❌ contentless（`content=''`）普通 DELETE 报错（需 `contentless_delete=1`）、且不能 rebuild。
+
+**修正方案 = external-content FTS5 + 标准 trigger**（弃用应用层手动双写）：建 `messages_fts USING fts5(body, content='messages', content_rowid='id')` + 3 个 trigger 自动同步；现有 `addMessage`/`copyMessage` 无需改（trigger 拦截）；删 session 的悬挂 rowid 靠 trigger 或定期 `rebuild` 清。**trigger 同步天然原子**（同事务），比应用层双写可靠（后者 `addMessage`/`copyMessage` 无事务包裹，单边提交风险——Codex 点 2）。
+
+- `messages.content` 是 JSON 字符串；namespace 要 JOIN sessions；path 在 `sessions.metadata`（`json_extract`）。
+- 落地：SCHEMA_VERSION 13→14，external-content FTS5 表 + INSERT/UPDATE/DELETE trigger；body 从 content JSON 提取（各 flavor 格式不同，**需明确确定性解析合同**——不违反 dumb-hub 红线，但要协调"各 flavor 格式"与"trigger 里的 SQL 提取"）。
+- **待拍**：① 同项目 path 归一化（worktree 子目录现算两个项目）；② body 范围；③ UPDATE trigger 的 body 重提成本。
+- memory `fts5-app-layer-doublewrite` 已证伪，改为 external-content 方案。
+
+### C. skill 机制 + 三条路（C 降级，manager 走 A 窄版为主 · 走查修正）
+
+**核实**：HAPI 注入 Claude 的 system prompt 只有 change_title/display_image/commit，**无 skill 列表**；`skill_lookup` 是 `$名字` 显式触发；`listSkills` 给 web/HTTP 不进 agent prompt。HAPI 跑 Claude = 标准 CLI + `--append-system-prompt`（追加不覆盖）+ `--settings` 只配 SessionStart hook、没禁 skill → Claude 原生 skill 机制层面未禁（但"会自主激活"❓ 未实测）。
+
+**经走查（Codex 点 1）：C 不作 v1.1 主路径。** skill 放宿机（含 `~/.agents/skills/`、`~/.claude/skills/`）= machine-local 隐式状态，破坏 HAPI"跨机器、远程控制"语义：版本/存在性/启停跨机器不一致；namespace 只路由隔离、不分发宿机文件；web 只能列不能管（编辑 skill = 远程写文件，要路径约束/防 symlink/权限/审计，非简单 CRUD）。
+
+**v1.1 主路径 = manager 走 A 窄版**：不做全局 skill 列表注入，把"何时搜兄弟、如何处理不可信结果"写进 **manager 已必需的专属 system/developer prompt**（Claude/Codex 都有干净通道）。manager session 由 hub/runner 起、prompt 跟 session 走 → 天然跨机器 + web 可管（manager 是 session）。
+
+**C 路径（降为可选增强）**：普通 Claude session 的"查兄弟"可做 skill 放**项目级 `.agents/skills/`**（flavor 中立，Claude/Cortex 都扫；借 Git 分发覆盖受控 repo）——回应"跟 Cortex skill 放一起"：`.agents/skills/` 确实是 flavor 中立目录、比 `~/.claude/skills` 更通用，但仅覆盖受控 repo、不覆盖任意远程目录、也不解决 web 启停。作实验性增强，非 v1.1 合同能力。
+
+注：A 也不是"天然跨机器"——prompt 编译在 CLI 仍依赖每台机器升级 CLI；真正中心化要把配置存 hub 随 spawn/RPC 下发（远期）。
+
+### D. manager 落地核实（capability/spawn 能力被高估 · 走查修正）
+
+- **role 进 schema**：`MetadataSchema`（`shared/src/schemas.ts:28`）是普通 `z.object`、**无 `.strict()`**——Zod **默认 strip unknown keys**（不是 strict 拒绝）。带未知 `role` 的对象 safeParse 成功但 `role` 被剥（`sessionCache.ts:123/1111` 用 parsed.data）。→ **必须显式加 `role: z.enum(['manager']).optional()`**；别用 `.passthrough()`（弱化合同）。只改 schema 不够：创建/恢复/summary/序列化/CLI 整对象更新都要逐条验证，防旧 CLI 覆盖丢 role。
+- **权限收窄（能力高估修正）**：`SessionCapabilitiesSchema`（`schemas.ts:14`）**只有 `terminal?: boolean`**——没有 edit/bash/MCP allowlist 的统一强制层。manager"关 terminal"能做，但"关 edit/bash、只留 allowlist"**现有 schema 不支持，要新增强制层**（不能靠 system prompt——Codex 点 4）。
+- **spawn worker（v1.2）**：`/spawn-session` 路由只透传 directory/sessionId/sessionType/worktreeName；底层 `SpawnSessionOptions`（`rpcTypes.ts`）支持 agent/model/permissionMode/yolo，**但没有工具白名单字段（待新增合同）**。worker 只读安全靠 capability 强制，不靠 spawn 透传 system prompt。
+- **派活注入**：Claude `--append-system-prompt`、Codex developer_instructions 干净；**角色/输出格式可走正常 user task**（不必塞 system）；权限走 capability 强制；只有持久策略/不可信边界走 system/developer。三者分别建模。
+
+### v1.1 修正图景（走查后）
+
+- **搜索工具（#3）**：HAPI 提供（hub external-content FTS5 + trigger + MCP 工具）。
+- **"查兄弟"主路径**：写进 **manager 专属 system/developer prompt**（A 窄版），跨机器 + web 可管。
+- **可选增强**：项目级 `.agents/skills/` skill（Git 分发，仅受控 repo + Claude；可跟 Cortex skill 同目录）。
+- **manager 综述**：`role=manager` 专职只读 session（capability 强制收窄，需扩 schema），用搜索工具做综述。
+
+**Codex 复审已并入**（点 1-4 + 其他，几乎全对，逐条实跑/读码核实）。**待办**：① FTS5 external-content + trigger 的 migration；② capability 强制层扩 edit/bash/allowlist；③ `role` 进 schema + 全链路验证；④ worker spawn 的工具白名单合同。
+
+---
+
 ## v1.2 · 多 agent 需求讨论(manager 主持 → 意见稿)
 
 > 状态:**调研背书(deep-research)+ Codex 两轮走查已并入;代码尚未改动。** v1.1 之后第二步。**第一版收成「独立单轮 panel + 单次合并」**(用户拍板 2026-07-18);多轮反驳、`relay_message` 后置。manager 第一个「有界 actuation」= `spawn_worker`(第一版**只需这一个**新工具;`relay_message` 随多轮后置),仍不碰文件。
@@ -61,7 +117,7 @@
 **定位(最重要,被调研修正过)**:这功能的价值是**多元视角 + 显式分歧地图 + 一份供人拍板的审议产物**,而**不是**「比单个强模型给出更对的答案」。调研最强的结论:**默认多 agent 辩论并不 reliably 打过 单 agent + 强 prompt / self-consistency**(Smit ICML 2024;Du 2023「提升事实性/推理」claim 被对抗投票 **refuted 0-3**)。所以**别按「更聪明」卖**,按「视角更广 + 把分歧摊给你」卖——对**需求/设计这种没有唯一正解**的审议场景,这才真有用。
 
 **协议(第一版 = 独立单轮 + 单次合并;用户拍板 2026-07-18)**:
-1. 你给需求 + 选 2-3 个参与者(**优先不同框架**——Claude + Kimi;同模型两份 = echo chamber)。
+1. 你给需求 + 选 2-3 个参与者(~~**优先不同框架**——Claude + Kimi~~;同模型两份 = echo chamber)。> ⚠️ **参与者候选集已修正（见「决策更新（2026-07-21）」A 节）：首发 Claude+Codex（可控专属通道），Kimi/Cursor 标"暂未验证"非"不能接"；原"Claude+Kimi"作废。**
 2. manager **spawn** 它们为 worker session(需新建 `spawn_worker` MCP 工具,见「能力分档」;worker = **只读讨论者**,见下「Codex 并入」)。
 3. **各 worker 独立出立场、互不可见**(避锚定)——这是第一版的**全部**交互。
 4. manager 用 eyes 收齐各 worker 答案 → **单次合并**出**意见稿 = {一致项 / 争议项(双/多方并列)/ 开放问题}**,带 provenance。**显式留分歧,绝不强行假一致。** 完。
