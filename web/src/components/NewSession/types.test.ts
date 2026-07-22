@@ -1,6 +1,12 @@
 import { CLAUDE_MODEL_PRESETS, getClaudeModelLabel } from '@hapi/protocol'
 import { describe, expect, it } from 'vitest'
-import { CLAUDE_EFFORT_OPTIONS, GROK_EFFORT_OPTIONS, MODEL_OPTIONS } from './types'
+import { CLAUDE_EFFORT_OPTIONS, DEFAULT_SESSION_TYPE, GROK_EFFORT_OPTIONS, MODEL_OPTIONS } from './types'
+
+describe('New session defaults', () => {
+    it('uses Worktree as the default session type', () => {
+        expect(DEFAULT_SESSION_TYPE).toBe('worktree')
+    })
+})
 
 describe('Claude model options', () => {
     it('derives options from shared Claude model presets', () => {

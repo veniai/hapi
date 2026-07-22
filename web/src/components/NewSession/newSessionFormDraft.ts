@@ -3,7 +3,7 @@ import {
     GROK_PERMISSION_MODES,
     type GrokPermissionMode
 } from '@hapi/protocol'
-import type { AgentType, LaunchEffort, CodexReasoningEffort, SessionType } from './types'
+import { DEFAULT_SESSION_TYPE, type AgentType, type LaunchEffort, type CodexReasoningEffort, type SessionType } from './types'
 
 const DRAFT_STORAGE_KEY = 'hapi:new-session-form-draft'
 
@@ -62,7 +62,7 @@ export function loadNewSessionFormDraft(): NewSessionFormDraft | null {
                 && GROK_PERMISSION_MODES.includes(parsed.grokPermissionMode as GrokPermissionMode)
                 ? parsed.grokPermissionMode as GrokPermissionMode
                 : 'default',
-            sessionType: (parsed.sessionType as SessionType | undefined) ?? 'simple',
+            sessionType: (parsed.sessionType as SessionType | undefined) ?? DEFAULT_SESSION_TYPE,
             worktreeName: typeof parsed.worktreeName === 'string' ? parsed.worktreeName : ''
         }
     } catch {

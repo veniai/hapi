@@ -49,6 +49,15 @@ describe('newSessionFormDraft', () => {
         })).toBe(true)
     })
 
+    it('uses Worktree when an older draft has no session type', () => {
+        sessionStorage.setItem('hapi:new-session-form-draft', JSON.stringify({
+            agent: 'claude',
+            model: 'auto'
+        }))
+
+        expect(loadNewSessionFormDraft()?.sessionType).toBe('worktree')
+    })
+
     it('matches machine when draft has no machine id', () => {
         const draft = loadNewSessionFormDraft()
         void draft
