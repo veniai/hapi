@@ -4,6 +4,7 @@ import {
     QUOTA_RESUME_PROMPT,
     RATE_RESUME_PROMPT,
     RATE_BACKOFF_BASE_MS,
+    QUOTA_RESET_BUFFER_MS,
     computeRateBackoff,
     rateWindow,
 } from './autoResume'
@@ -97,6 +98,10 @@ describe('classifySyntheticError', () => {
 describe('computeRateBackoff', () => {
     it('base CD = 60s (user-tuned)', () => {
         expect(RATE_BACKOFF_BASE_MS).toBe(60_000)
+    })
+
+    it('quota reset buffer = 60s (avoid racing the quota lift)', () => {
+        expect(QUOTA_RESET_BUFFER_MS).toBe(60_000)
     })
 
     it('tier 0 → 60s, tier 1 → 120s, tier 4 → 960s (exponential)', () => {

@@ -1,7 +1,7 @@
 import { createConfiguration, type ConfigSource } from './configuration'
 import { Store } from './store'
 import { SyncEngine, type SyncEvent } from './sync/syncEngine'
-import { QUOTA_RESUME_PROMPT, RATE_RESUME_PROMPT, computeRateBackoff, rateWindow, RATE_AUTO_RESUME_PREFIX, RATE_TIER_WINDOW_MS } from './sync/autoResume'
+import { QUOTA_RESUME_PROMPT, RATE_RESUME_PROMPT, computeRateBackoff, rateWindow, RATE_AUTO_RESUME_PREFIX, RATE_TIER_WINDOW_MS, QUOTA_RESET_BUFFER_MS } from './sync/autoResume'
 import { NotificationHub } from './notifications/notificationHub'
 import type { NotificationChannel } from './notifications/notificationTypes'
 import { HappyBot } from './telegram/bot'
@@ -197,12 +197,14 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         onMessagesConsumed: (sessionId) => syncEngine?.clearQueuedThinkingGrace(sessionId),
         onAutoResumeSchedule: (sid, error) => {
             if (error.kind === 'quota') {
-                // scheduledAt in the past → sendMessage sends immediately (SDK already
-                // spun past the reset point); in the future → 5s tick releases it.
+                // Schedule AFTER reset + buffer: the reset time is when GLM lifts the
+                // quota, but sending at exactly that moment races the limit still being
+                // in effect → resume would fail. Buffer (60s) avoids it.
+                const scheduledAt = error.resetsAtMs + QUOTA_RESET_BUFFER_MS
                 void syncEngine?.sendMessage(sid, {
                     text: QUOTA_RESUME_PROMPT,
-                    scheduledAt: error.resetsAtMs,
-                    localId: `auto-resume-${sid}-${error.resetsAtMs}`,
+                    scheduledAt,
+                    localId: `auto-resume-${sid}-${scheduledAt}`,
                     sentFrom: 'system',
                 }).catch((e) => console.warn(`[auto-resume] quota schedule failed for ${sid}: ${e instanceof Error ? e.message : String(e)}`))
                 return

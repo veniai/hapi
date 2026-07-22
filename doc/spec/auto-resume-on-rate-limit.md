@@ -159,7 +159,6 @@ export function classifySyntheticQuotaError(content: unknown): {
  *  sentFrom:'system'（已加进联合，§6.3）让 web 日后能徽章；现靠文案自标即可识别。 */
 export const QUOTA_RESUME_PROMPT =
     '（系统自动恢复：API 5 小时限额已重置）临时中断，继续刚才的任务：' +
-    '有 skill 必须调 Skill tool 并严格按 skill 流程执行（不得 inline 替代）；' +
     '单步过长可拆分但不跳过；已完成不重做。';
 ```
 
@@ -229,7 +228,7 @@ onAutoResumeSchedule: (sid, resetsAtMs, _code) => {
 
 **去重（防密集风暴）**：限流密集时 ~80s 落一条 `[1302]`。localId `auto-resume-rate-<sid>-<window>`（window = `floor(now/60s)`），addMessage 幂等 → **同 60s 窗口只排一条**。
 
-**配置点（startHub）**：`onAutoResumeSchedule(sid, error)` switch `error.kind`：quota → §6.3（`scheduledAt: resetsAtMs`）；rate → `computeRateBackoff(sid, store)`，null（cap）不排，否则 `sendMessage({scheduledAt: now+delay, localId: auto-resume-rate-<sid>-<window>, sentFrom:'system'})`。
+**配置点（startHub）**：`onAutoResumeSchedule(sid, error)` switch `error.kind`：quota → §6.3（`scheduledAt: resetsAtMs + 60s buffer`——reset 时刻是 GLM 解除限额的瞬间，精确卡点发会撞墙，buffer 60s 避免恢复消息失败）；rate → `computeRateBackoff(sid, store)`，null（cap）不排，否则 `sendMessage({scheduledAt: now+delay, localId: auto-resume-rate-<sid>-<window>, sentFrom:'system'})`。
 
 **RATE_RESUME_PROMPT**：同 QUOTA_RESUME_PROMPT 结构，标"（系统自动恢复：API 速率限制，已退避等待）"。
 
