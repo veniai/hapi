@@ -83,6 +83,26 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
         return await next()
     })
 
+    app.get('/search', async (c) => {
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ error: 'Not ready' }, 503)
+        }
+        const namespace = c.get('namespace')
+        const q = (c.req.query('q') ?? '').trim()
+        const path = (c.req.query('path') ?? '').trim()
+        const limit = Math.min(parseInt(c.req.query('limit') ?? '20', 10) || 20, 50)
+        if (!q || !path) {
+            return c.json({ error: 'q and path are required' }, 400)
+        }
+        try {
+            return c.json({ hits: engine.searchMessages(namespace, path, q, limit) })
+        } catch {
+            // FTS5 MATCH syntax error → empty, not 500.
+            return c.json({ hits: [] })
+        }
+    })
+
     app.post('/sessions', async (c) => {
         const engine = getSyncEngine()
         if (!engine) {

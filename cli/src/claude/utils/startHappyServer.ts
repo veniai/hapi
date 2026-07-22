@@ -212,14 +212,17 @@ function createHapiMcpServer(
         title: 'Search Sibling Sessions',
         inputSchema: z.object({
             query: z.string().describe('Keyword(s) to search for in sibling sessions\' conversations'),
-            path: z.string().describe('Project directory path (the session cwd) to scope the search'),
             limit: z.number().optional().describe('Max results (default 20, capped at 50)')
         }),
-    }, async (args: { query: string; path: string; limit?: number }) => {
+    }, async (args: { query: string; limit?: number }) => {
         try {
-            const params = new URLSearchParams({ q: args.query, path: args.path });
+            const cwd = client.getPath();
+            if (!cwd) {
+                throw new Error('session working directory unavailable');
+            }
+            const params = new URLSearchParams({ q: args.query, path: cwd });
             if (args.limit !== undefined) params.set('limit', String(args.limit));
-            const res = await fetch(`${configuration.apiUrl}/api/search?${params}`, {
+            const res = await fetch(`${configuration.apiUrl}/cli/search?${params}`, {
                 headers: { Authorization: `Bearer ${client.getToken()}` }
             });
             if (!res.ok) {

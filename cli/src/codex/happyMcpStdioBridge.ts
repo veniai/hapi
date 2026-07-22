@@ -164,7 +164,6 @@ export async function runHappyMcpStdioBridge(argv: string[]): Promise<void> {
 
     const searchSiblingInputSchema: z.ZodTypeAny = z.object({
       query: z.string().describe('Keyword(s) to search for in sibling sessions\' conversations'),
-      path: z.string().describe('Project directory path (the session cwd) to scope the search'),
       limit: z.number().optional().describe('Max results (default 20, capped at 50)'),
     });
 
