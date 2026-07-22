@@ -20,10 +20,10 @@ This file is the editable source for the generated project `AGENTS.md`. Edit thi
 - **Commands (run from repo root):**
   - `bun typecheck` — all packages
   - `bun run test` — all packages (cli + hub + web + shared), Vitest
-  - `bun run build:web` — web dist; **local / pre-promotion gate**（typecheck/test 过 ≠ 能 build）。**GitHub CI gate 待实现**（`test.yml` 当前只 install+typecheck+test，不跑 build）。
+  - `bun run build:web` — web dist; **本地门 + GitHub CI 门**（typecheck/test 过 ≠ 能 build；`test.yml` CI 也跑这条）。
   - `bun run test:e2e` — Playwright e2e (slow; not in default gate)
 - **cli test caveat:** `cli/src/runner/runner.integration.test.ts` writes the real `cli/package.json` (auto-restored in `finally`, but not under SIGKILL/timeout). **Deploy-host full gate =** `(cd cli && bun run tools:unpack && bunx vitest run --exclude '**/*.integration.test.ts') && bun run test:hub && bun run test:web && bun run test:shared`（exclude cli integration，keep hub/web/shared；用 bunx 因 deploy job PATH 不含 node_modules/.bin）。
-- **Source/purpose:** pre-push mechanical gate（typecheck+test 对应 `test.yml`；build:web 是本地/部署门，未进 GitHub CI）。Test files `*.test.ts(x)` live next to source.
+- **Source/purpose:** pre-push mechanical gate（typecheck+test+build:web，对应 `test.yml` CI 同门）。Test files `*.test.ts(x)` live next to source.
 - **Build artifacts:** `bun run build:single-exe` (all-in-one binary, release only).
 
 ## Permission Envelope
@@ -213,7 +213,7 @@ Branches: `main` → tracks `upstream/main`, PR target, **branch-protected** (re
 
 Before commit/push/PR:
 
-1. **Mechanical:** `bun typecheck && bun run test` (matches `.github/workflows/test.yml`)
+1. **Mechanical:** `bun typecheck && bun run test && bun run build:web` (matches `.github/workflows/test.yml`)
 2. **Logic:** skim `git diff origin/main...HEAD`; apply `.github/prompts/codex-pr-review.md` as a local Major checklist (no Codex required)
 3. **Style:** optional
 

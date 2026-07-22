@@ -1,9 +1,11 @@
 import { useNavigate } from '@tanstack/react-router'
+import { useOpenSession } from '@/hooks/useOpenSession'
 import { Toast } from '@/components/ui/Toast'
 import { useToast } from '@/lib/toast-context'
 
 export function ToastContainer() {
     const navigate = useNavigate()
+    const openSession = useOpenSession()
     const { toasts, removeToast } = useToast()
 
     if (toasts.length === 0) {
@@ -24,10 +26,7 @@ export function ToastContainer() {
                     onClick={() => {
                         removeToast(toast.id)
                         if (toast.sessionId) {
-                            void navigate({
-                                to: '/sessions/$sessionId',
-                                params: { sessionId: toast.sessionId }
-                            })
+                            openSession(toast.sessionId)
                             return
                         }
                         if (toast.url) {

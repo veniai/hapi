@@ -10,7 +10,12 @@ let sessions: SessionSummary[] = []
 
 vi.mock('@tanstack/react-router', () => ({
     useNavigate: () => navigateMock,
-    useMatchRoute: () => () => selectedSessionId ? { sessionId: selectedSessionId } : false
+    useMatchRoute: () => () => selectedSessionId ? { sessionId: selectedSessionId } : false,
+    // FAB renders on a session page (off-list) → useOpenSession picks replace.
+    useLocation: (opts?: { select?: (l: { pathname: string }) => unknown }) => {
+        const loc = { pathname: '/sessions/current' }
+        return opts?.select ? opts.select(loc) : loc
+    }
 }))
 
 vi.mock('@/lib/app-context', () => ({
@@ -87,7 +92,8 @@ describe('PendingInboxFab', () => {
         fireEvent.click(screen.getByRole('button', { name: '待处理 2 个会话' }))
         expect(navigateMock).toHaveBeenLastCalledWith({
             to: '/sessions/$sessionId',
-            params: { sessionId: 'first' }
+            params: { sessionId: 'first' },
+            replace: true
         })
 
         selectedSessionId = 'first'
@@ -95,7 +101,8 @@ describe('PendingInboxFab', () => {
         fireEvent.click(screen.getByRole('button', { name: '待处理 1 个会话' }))
         expect(navigateMock).toHaveBeenLastCalledWith({
             to: '/sessions/$sessionId',
-            params: { sessionId: 'second' }
+            params: { sessionId: 'second' },
+            replace: true
         })
     })
 

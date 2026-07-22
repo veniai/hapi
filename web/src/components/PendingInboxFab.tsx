@@ -1,11 +1,12 @@
 import { useMemo } from 'react'
-import { useMatchRoute, useNavigate } from '@tanstack/react-router'
+import { useMatchRoute } from '@tanstack/react-router'
 import type { SessionSummary } from '@/types/api'
 import { useSessions } from '@/hooks/queries/useSessions'
 import { useAppContext } from '@/lib/app-context'
 import { classifySessionAttention } from '@/lib/sessionAttention'
 import { reconcilePendingSessions, compareByPendingSince, getPendingSinceStore } from '@/lib/pending-since-store'
 import { useSessionLastSeenVersion } from '@/hooks/useSessionLastSeen'
+import { useOpenSession } from '@/hooks/useOpenSession'
 import { getSessionLastSeenStore } from '@/lib/sessionLastSeen'
 import { useTranslation } from '@/lib/use-translation'
 
@@ -51,7 +52,7 @@ export function PendingInboxFab() {
     const { t } = useTranslation()
     const { api } = useAppContext()
     const { sessions } = useSessions(api)
-    const navigate = useNavigate()
+    const openSession = useOpenSession()
     const matchRoute = useMatchRoute()
     const lastSeenVersion = useSessionLastSeenVersion()
     const sessionMatch = matchRoute({ to: '/sessions/$sessionId', fuzzy: true })
@@ -71,7 +72,7 @@ export function PendingInboxFab() {
     const handleClick = () => {
         const first = pendingSessions[0]
         if (first) {
-            navigate({ to: '/sessions/$sessionId', params: { sessionId: first.id } })
+            openSession(first.id)
         }
     }
 
