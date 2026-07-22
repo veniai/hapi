@@ -24,36 +24,61 @@ describe('useOpenSession', () => {
         navigateMock.mockClear()
     })
 
-    it.each([
-        // On the list → push (replace: false) so system back reaches the list
-        ['/sessions', false],
-        ['/sessions/', false],
-        // '/' is the root, not the sessions index; it redirects to /sessions
-        // instantly so useOpenSession never fires here. Off-list → replace.
-        ['/', true],
-        // Off the list → replace (no stacking on session switch)
-        ['/sessions/new', true],
-        ['/sessions/abc', true],
-        ['/sessions/abc/files', true],
-    ])('pathname %s → replace=%s', (pathname, expectedReplace) => {
-        pathnameRef.current = pathname
+    it('pushes from the list route (no replace, so system back reaches the list)', () => {
+        pathnameRef.current = '/sessions'
         const { result } = renderHook(() => useOpenSession())
         act(() => result.current('abc'))
+        expect(navigateMock).toHaveBeenCalledTimes(1)
         expect(navigateMock).toHaveBeenLastCalledWith({
             to: '/sessions/$sessionId',
             params: { sessionId: 'abc' },
-            replace: expectedReplace,
         })
     })
 
-    it('passes the sessionId through to navigate', () => {
-        pathnameRef.current = '/sessions'
+    it('treats /sessions/ (trailing slash) as list too', () => {
+        pathnameRef.current = '/sessions/'
         const { result } = renderHook(() => useOpenSession())
-        act(() => result.current('xyz-123'))
+        act(() => result.current('abc'))
+        expect(navigateMock).toHaveBeenCalledTimes(1)
         expect(navigateMock).toHaveBeenLastCalledWith({
             to: '/sessions/$sessionId',
-            params: { sessionId: 'xyz-123' },
-            replace: false,
+            params: { sessionId: 'abc' },
         })
+    })
+
+    it('replaces from the session chat page (stack stays [list, B])', () => {
+        pathnameRef.current = '/sessions/xyz'
+        const { result } = renderHook(() => useOpenSession())
+        act(() => result.current('abc'))
+        expect(navigateMock).toHaveBeenCalledTimes(1)
+        expect(navigateMock).toHaveBeenLastCalledWith({
+            to: '/sessions/$sessionId',
+            params: { sessionId: 'abc' },
+            replace: true,
+        })
+    })
+
+    it('two-step from a sub-page: replace /sessions then push B (back → list, no flicker)', () => {
+        pathnameRef.current = '/sessions/xyz/files'
+        const { result } = renderHook(() => useOpenSession())
+        act(() => result.current('abc'))
+        expect(navigateMock).toHaveBeenCalledTimes(2)
+        expect(navigateMock).toHaveBeenNthCalledWith(1, {
+            to: '/sessions',
+            replace: true,
+        })
+        // second step is a push (no replace) — final target B
+        expect(navigateMock).toHaveBeenLastCalledWith({
+            to: '/sessions/$sessionId',
+            params: { sessionId: 'abc' },
+        })
+    })
+
+    it('two-step from terminal sub-page too', () => {
+        pathnameRef.current = '/sessions/xyz/terminal'
+        const { result } = renderHook(() => useOpenSession())
+        act(() => result.current('abc'))
+        expect(navigateMock).toHaveBeenCalledTimes(2)
+        expect(navigateMock).toHaveBeenNthCalledWith(1, { to: '/sessions', replace: true })
     })
 })
