@@ -228,6 +228,11 @@ export class ApiSessionClient extends EventEmitter {
     getToken(): string {
         return this.token
     }
+
+    /** Session working directory (cwd) for MCP tools (e.g. search_sibling path scoping). */
+    getPath(): string | undefined {
+        return this.metadata?.path
+    }
     private agentState: AgentState | null
     private agentStateVersion: number
     private readonly socket: Socket<ServerToClientEvents, ClientToServerEvents>
