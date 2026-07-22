@@ -219,7 +219,16 @@ export class SDKToLogConverter {
             version: this.context.version,
             gitBranch: this.context.gitBranch,
             uuid,
-            timestamp
+            timestamp,
+            // The remote SDK labels internal skill injections as synthetic,
+            // while the log pipeline uses isMeta for messages that must not
+            // be sent to the web UI. Normalize both forms here.
+            ...(sdkMessage.isMeta === true || sdkMessage.isSynthetic === true
+                ? { isMeta: true }
+                : {}),
+            ...(sdkMessage.isCompactSummary === true
+                ? { isCompactSummary: true }
+                : {})
         }
 
         let logMessage: RawJSONLines | null = null
