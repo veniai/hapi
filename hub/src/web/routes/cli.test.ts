@@ -116,6 +116,54 @@ describe('cli resume routes', () => {
     })
 })
 
+describe('cli sibling search route', () => {
+    it('passes the issuing session id to the workspace-scoped search', async () => {
+        const calls: Array<{ namespace: string; path: string; query: string; limit: number; sessionId?: string }> = []
+        const app = createApp({
+            searchMessages: (namespace: string, path: string, query: string, limit: number, sessionId?: string) => {
+                calls.push({ namespace, path, query, limit, sessionId })
+                return []
+            }
+        } as never)
+
+        const response = await app.request('/cli/search?q=send+button&path=%2Frepo&sessionId=current&limit=10', {
+            headers: authHeaders()
+        })
+
+        expect(response.status).toBe(200)
+        expect(calls).toEqual([{
+            namespace: 'default',
+            path: '/repo',
+            query: 'send button',
+            limit: 10,
+            sessionId: 'current'
+        }])
+    })
+
+    it('adds a public session link to sibling search hits', async () => {
+        const app = createApp({
+            searchMessages: () => [{
+                messageId: 'message-1',
+                sessionId: 'sibling-session',
+                sessionName: '调整发送按钮尺寸',
+                seq: 369,
+                createdAt: 123,
+                path: '/repo',
+                rank: -1,
+                contentSnippet: 'h-[50px] w-[50px]'
+            }]
+        } as never)
+
+        const response = await app.request('/cli/search?q=send+button&path=%2Frepo', {
+            headers: authHeaders()
+        })
+
+        expect(response.status).toBe(200)
+        const body = await response.json() as { hits: Array<{ sessionUrl: string }> }
+        expect(body.hits[0]?.sessionUrl).toMatch(/\/sessions\/sibling-session$/)
+    })
+})
+
 describe('cli lazy session creation', () => {
     const sessionId = '11111111-1111-4111-8111-111111111111'
 

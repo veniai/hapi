@@ -32,6 +32,9 @@ export type WorktreeMetadata = z.infer<typeof WorktreeMetadataSchema>
 
 export const MetadataSchema = z.object({
     path: z.string(),
+    // Stable project identity used for cross-worktree session search.
+    // Falls back to path for legacy sessions without this field.
+    workspacePath: z.string().optional(),
     host: z.string(),
     version: z.string().optional(),
     name: z.string().optional(),

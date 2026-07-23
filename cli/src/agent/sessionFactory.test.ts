@@ -200,6 +200,7 @@ describe('bootstrapExistingSession', () => {
         })
 
         expect(metadata.capabilities?.terminal).toBe(true)
+        expect(metadata.workspacePath).toBe('/tmp/project')
     })
 })
 

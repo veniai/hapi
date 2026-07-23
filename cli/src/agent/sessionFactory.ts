@@ -11,7 +11,7 @@ import { configuration } from '@/configuration'
 import { logger } from '@/ui/logger'
 import { runtimePath } from '@/projectPath'
 import { getInvokedCwd } from '@/utils/invokedCwd'
-import { readWorktreeEnv } from '@/utils/worktreeEnv'
+import { readWorktreeEnv, resolveWorkspacePath } from '@/utils/worktreeEnv'
 import packageJson from '../../package.json'
 
 export type SessionStartedBy = 'runner' | 'terminal'
@@ -59,11 +59,12 @@ export function buildSessionMetadata(options: {
     metadataOverrides?: Partial<Metadata>
 }): Metadata {
     const happyLibDir = runtimePath()
-    const worktreeInfo = readWorktreeEnv()
+    const worktreeInfo = readWorktreeEnv(options.workingDirectory)
     const now = options.now ?? Date.now()
 
     return {
         path: options.workingDirectory,
+        workspacePath: resolveWorkspacePath(options.workingDirectory),
         host: process.env.HAPI_HOSTNAME || os.hostname(),
         version: packageJson.version,
         os: os.platform(),
@@ -107,6 +108,7 @@ function pickExistingSessionMetadata(metadata: Metadata | null | undefined): Par
     if (metadata.tools !== undefined) preserved.tools = metadata.tools
     if (metadata.slashCommands !== undefined) preserved.slashCommands = metadata.slashCommands
     if (metadata.worktree !== undefined) preserved.worktree = metadata.worktree
+    if (metadata.workspacePath !== undefined) preserved.workspacePath = metadata.workspacePath
     // Preserve cached Pi model list so the web can show models immediately
     // on inactive-session view without waiting for an RPC round-trip.
     if (metadata.piAvailableModels !== undefined) preserved.piAvailableModels = metadata.piAvailableModels

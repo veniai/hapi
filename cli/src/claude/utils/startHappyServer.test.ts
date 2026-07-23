@@ -32,6 +32,7 @@ describe('startHappyServer skill_lookup', () => {
     afterEach(async () => {
         await client?.close()
         stopServer?.()
+        vi.unstubAllGlobals()
         if (originalHome === undefined) {
             delete process.env.HOME
         } else {
@@ -110,5 +111,73 @@ describe('startHappyServer skill_lookup', () => {
             'display_image',
             'search_sibling'
         ])
+    })
+
+    it('scopes sibling search to the workspace and excludes the current session', async () => {
+        const originalFetch = globalThis.fetch
+        const fetchImplementation = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+            const requestUrl = typeof input === 'string'
+                ? new URL(input)
+                : input instanceof URL
+                    ? input
+                    : new URL(input.url)
+            if (requestUrl.pathname === '/cli/search') {
+                return new Response(JSON.stringify({ hits: [{
+                    messageId: 'message-1',
+                    sessionId: 'sibling-session',
+                    sessionName: '调整发送按钮尺寸',
+                    sessionUrl: 'https://hapi.zhetengde.xyz/sessions/sibling-session',
+                    seq: 369,
+                    path: workingDirectory,
+                    contentSnippet: 'h-[50px] w-[50px]'
+                }] }), {
+                    status: 200,
+                    headers: { 'content-type': 'application/json' }
+                })
+            }
+            return originalFetch(input, init)
+        }
+        const fetchMock = vi.fn(fetchImplementation)
+        vi.stubGlobal('fetch', fetchMock)
+
+        const sessionClient = {
+            sessionId: 'current-session',
+            getToken: () => 'test-token',
+            getWorkspacePath: () => workingDirectory,
+            updateMetadata: vi.fn(),
+            sendAgentMessage: vi.fn(),
+            sendClaudeSessionMessage: vi.fn()
+        } as unknown as ApiSessionClient
+        const server = await startHappyServer(sessionClient)
+        stopServer = server.stop
+
+        client = new Client(
+            { name: 'hapi-sibling-search-test', version: '1.0.0' },
+            { capabilities: {} }
+        )
+        await client.connect(new StreamableHTTPClientTransport(new URL(server.url)))
+        const result = await client.callTool({
+            name: 'search_sibling',
+            arguments: { query: 'send button', limit: 7 }
+        }) as ToolResult
+        expect(result.content?.[0]?.text).toContain('调整发送按钮尺寸')
+        expect(result.content?.[0]?.text).toContain('sibling-session')
+        expect(result.content?.[0]?.text).toContain('(https://hapi.zhetengde.xyz/sessions/sibling-session)')
+
+        const searchCalls = fetchMock.mock.calls.filter(([input]) => {
+            const requestUrl = typeof input === 'string'
+                ? new URL(input)
+                : input instanceof URL
+                    ? input
+                    : new URL(input.url)
+            return requestUrl.pathname === '/cli/search'
+        })
+        expect(searchCalls).toHaveLength(1)
+        const requestUrl = new URL(String(searchCalls[0]?.[0]))
+        expect(requestUrl.pathname).toBe('/cli/search')
+        expect(requestUrl.searchParams.get('q')).toBe('send button')
+        expect(requestUrl.searchParams.get('path')).toBe(workingDirectory)
+        expect(requestUrl.searchParams.get('sessionId')).toBe('current-session')
+        expect(requestUrl.searchParams.get('limit')).toBe('7')
     })
 })

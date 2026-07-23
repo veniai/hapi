@@ -49,7 +49,7 @@ import { updateVersionedField } from './versionedUpdates'
 // thread id with `codexSessionId: null` so a `/clear` command actually
 // drops the persisted thread. `undefined` (key missing from `next`)
 // continues to mean "carry forward".
-const PARSE_IDENTITY_FIELDS = ['path', 'host'] as const
+const PARSE_IDENTITY_FIELDS = ['path', 'workspacePath', 'host'] as const
 
 const ROUTING_FIELDS = ['flavor', 'machineId'] as const
 

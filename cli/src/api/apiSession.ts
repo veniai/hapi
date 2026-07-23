@@ -233,6 +233,11 @@ export class ApiSessionClient extends EventEmitter {
     getPath(): string | undefined {
         return this.metadata?.path
     }
+
+    /** Stable project path for MCP tools; HAPI worktrees share their base path. */
+    getWorkspacePath(): string | undefined {
+        return this.metadata?.workspacePath ?? this.metadata?.worktree?.basePath ?? this.metadata?.path
+    }
     private agentState: AgentState | null
     private agentStateVersion: number
     private readonly socket: Socket<ServerToClientEvents, ClientToServerEvents>
