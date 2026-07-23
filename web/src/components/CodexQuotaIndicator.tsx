@@ -11,7 +11,7 @@ function QuotaBar(props: { label: string; window: CodexQuotaWindowPresentation |
             <span className="w-5 shrink-0 text-[8px] font-semibold uppercase tracking-wide text-[var(--app-hint)]">
                 {props.label}
             </span>
-            <span className="relative h-1.5 w-8 shrink-0 overflow-hidden rounded-full bg-[var(--app-border)]/80" aria-hidden="true">
+            <span className="relative h-1.5 w-6 shrink-0 overflow-hidden rounded-full bg-[var(--app-border)]/80" aria-hidden="true">
                 <span
                     className={cn(
                         'block h-full rounded-full',
@@ -19,9 +19,9 @@ function QuotaBar(props: { label: string; window: CodexQuotaWindowPresentation |
                     )}
                     style={{ width: `${props.window?.remainingPercent ?? 0}%` }}
                 />
-            </span>
-            <span className="w-7 shrink-0 text-[10px] tabular-nums text-[var(--app-fg)]/80">
-                {props.window ? `${props.window.remainingPercent}%` : '—'}
+                {!props.window ? (
+                    <span className="absolute inset-0 text-center text-[8px] leading-[6px] text-[var(--app-hint)]">—</span>
+                ) : null}
             </span>
         </span>
     )
@@ -73,7 +73,7 @@ export function CodexQuotaIndicator(props: {
         <button
             type="button"
             className={cn(
-                'inline-flex flex-row flex-nowrap items-center gap-x-1.5 rounded-md border px-1 py-0.5',
+                'inline-flex flex-row flex-nowrap items-center gap-x-1 rounded-md border px-1 py-0.5',
                 MACHINE_HEALTH_CHIP_CLASS[overallTone],
                 props.className
             )}
