@@ -27,13 +27,13 @@ function QuotaBar(props: { label: string; window: CodexQuotaWindowPresentation |
     )
 }
 
-function formatDateTime(timestamp: number, unit: 'seconds' | 'milliseconds'): string {
+function formatResetAt(timestampSeconds: number): string {
     return new Intl.DateTimeFormat(undefined, {
         month: 'short',
         day: 'numeric',
         hour: 'numeric',
         minute: '2-digit'
-    }).format(new Date(unit === 'seconds' ? timestamp * 1000 : timestamp))
+    }).format(new Date(timestampSeconds * 1000))
 }
 
 export function CodexQuotaIndicator(props: {
@@ -126,7 +126,7 @@ export function CodexQuotaIndicator(props: {
                         {presentation.fiveHour ? (
                             <span className="flex justify-between gap-3 text-[var(--app-hint)]">
                                 <span>{t('machine.quota.reset')}</span>
-                                <span>{formatDateTime(presentation.fiveHour.resetAt, 'seconds')}</span>
+                                <span>{formatResetAt(presentation.fiveHour.resetAt)}</span>
                             </span>
                         ) : null}
                         <span className="flex justify-between gap-3">
@@ -138,15 +138,11 @@ export function CodexQuotaIndicator(props: {
                         {presentation.weekly ? (
                             <span className="flex justify-between gap-3 text-[var(--app-hint)]">
                                 <span>{t('machine.quota.reset')}</span>
-                                <span>{formatDateTime(presentation.weekly.resetAt, 'seconds')}</span>
+                                <span>{formatResetAt(presentation.weekly.resetAt)}</span>
                             </span>
                         ) : null}
                     </>
                 )}
-                <span className="flex justify-between gap-3 text-[var(--app-hint)]">
-                    <span>{t('machine.quota.nextRefresh')}</span>
-                    <span>{formatDateTime(presentation.nextRefreshAt, 'milliseconds')}</span>
-                </span>
             </span>
         </HoverTooltip>
     )

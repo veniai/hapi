@@ -26,7 +26,6 @@ export type CodexQuotaWindowPresentation = {
 
 export type CodexQuotaPresentation = {
     status: 'ok' | 'error'
-    nextRefreshAt: number
     fiveHour: CodexQuotaWindowPresentation | null
     weekly: CodexQuotaWindowPresentation | null
 }
@@ -96,7 +95,6 @@ export function presentCodexQuota(
     if (!quota) return null
     return {
         status: quota.status,
-        nextRefreshAt: quota.collectedAt + 5 * 60_000,
         fiveHour: presentQuotaWindow(quota.fiveHour),
         weekly: presentQuotaWindow(quota.weekly)
     }

@@ -300,7 +300,6 @@ export default {
   'machine.quota.fiveHour': '5 小时剩余',
   'machine.quota.weekly': '周额度剩余',
   'machine.quota.reset': '重置时间',
-  'machine.quota.nextRefresh': '下次查询',
   'machine.quota.aria.error': 'Codex 额度查询失败',
   'machine.quota.aria.summary': 'Codex 额度：5 小时剩余 {fiveHour}%；周额度剩余 {weekly}%',
 

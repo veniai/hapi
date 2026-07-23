@@ -296,7 +296,6 @@ export default {
   'machine.quota.fiveHour': '5-hour remaining',
   'machine.quota.weekly': 'Weekly remaining',
   'machine.quota.reset': 'Resets',
-  'machine.quota.nextRefresh': 'Next query',
   'machine.quota.aria.error': 'Codex quota query failed',
   'machine.quota.aria.summary': 'Codex quota: 5-hour {fiveHour} percent remaining; weekly {weekly} percent remaining',
 

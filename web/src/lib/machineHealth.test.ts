@@ -23,7 +23,6 @@ describe('presentMachineHealth', () => {
 
         expect(result).toEqual({
             status: 'ok',
-            nextRefreshAt: 300001,
             fiveHour: { remainingPercent: 82, resetAt: 100, tone: 'ok' },
             weekly: null
         })
@@ -32,7 +31,6 @@ describe('presentMachineHealth', () => {
     it('keeps quota query failures explicit without a previous window', () => {
         expect(presentCodexQuota({ status: 'error', collectedAt: 1 })).toEqual({
             status: 'error',
-            nextRefreshAt: 300001,
             fiveHour: null,
             weekly: null
         })
