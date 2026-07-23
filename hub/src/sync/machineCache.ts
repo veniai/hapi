@@ -31,6 +31,7 @@ function healthDisplayChanged(
         || before.memoryPercent !== after.memoryPercent
         || before.cpuCount !== after.cpuCount
         || before.uptimeSeconds !== after.uptimeSeconds
+        || JSON.stringify(before.codexQuota) !== JSON.stringify(after.codexQuota)
 }
 
 export class MachineCache {

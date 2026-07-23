@@ -1,12 +1,43 @@
 import { describe, expect, it } from 'vitest'
 import {
     formatMachineUptimeSeconds,
+    presentCodexQuota,
     presentMachineHealth,
     resolveMachineOsLabel,
     shouldShowMachineHostSubtitle,
 } from './machineHealth'
 
 describe('presentMachineHealth', () => {
+    it('classifies Codex windows by duration and reports remaining percent', () => {
+        const result = presentCodexQuota({
+            status: 'ok',
+            collectedAt: 1,
+            fiveHour: {
+                usedPercent: 18,
+                windowSeconds: 18_000,
+                resetAt: 100,
+                resetAfterSeconds: 50
+            },
+            weekly: null
+        })
+
+        expect(result).toEqual({
+            status: 'ok',
+            nextRefreshAt: 300001,
+            fiveHour: { remainingPercent: 82, resetAt: 100, tone: 'ok' },
+            weekly: null
+        })
+    })
+
+    it('keeps quota query failures explicit without a previous window', () => {
+        expect(presentCodexQuota({ status: 'error', collectedAt: 1 })).toEqual({
+            status: 'error',
+            nextRefreshAt: 300001,
+            fiveHour: null,
+            weekly: null
+        })
+    })
+
     it('builds cpu and ram metrics for visual meters', () => {
         const result = presentMachineHealth({
             collectedAt: Date.now(),

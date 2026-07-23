@@ -1,6 +1,8 @@
 import type { Machine } from '@/types/api'
 import { MachineHealthIndicator } from '@/components/MachineHealthIndicator'
+import { CodexQuotaIndicator } from '@/components/CodexQuotaIndicator'
 import {
+    type CodexQuotaPresentation,
     type MachineHealthPresentation,
 } from '@/lib/machineHealth'
 import { cn } from '@/lib/utils'
@@ -56,6 +58,7 @@ export function MachineGroupHeader(props: {
     onToggle: () => void
     machine?: Machine
     healthPresentation: MachineHealthPresentation | null
+    quotaPresentation?: CodexQuotaPresentation | null
 }) {
     const hasHealth = props.healthPresentation && props.healthPresentation.metrics.length > 0
 
@@ -86,6 +89,9 @@ export function MachineGroupHeader(props: {
                     compact
                     className="shrink-0"
                 />
+            ) : null}
+            {props.quotaPresentation ? (
+                <CodexQuotaIndicator presentation={props.quotaPresentation} className="shrink-0" />
             ) : null}
             <span className="ml-auto shrink-0 text-[11px] tabular-nums text-[var(--app-hint)]">
                 ({props.sessionCount})

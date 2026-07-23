@@ -294,6 +294,15 @@ export default {
   'machine.health.aria.cpu': 'CPU {n}%',
   'machine.health.aria.ram': '内存 {n}%',
   'machine.health.aria.unknown': '机器健康数据不可用',
+  'machine.quota.tooltip.title': 'Codex 额度',
+  'machine.quota.tooltip.queryFailed': '额度查询失败，不显示上一次结果。',
+  'machine.quota.queryFailedShort': '额度查询失败',
+  'machine.quota.fiveHour': '5 小时剩余',
+  'machine.quota.weekly': '周额度剩余',
+  'machine.quota.reset': '重置时间',
+  'machine.quota.nextRefresh': '下次查询',
+  'machine.quota.aria.error': 'Codex 额度查询失败',
+  'machine.quota.aria.summary': 'Codex 额度：5 小时剩余 {fiveHour}%；周额度剩余 {weekly}%',
 
   // Chat
   'chat.placeholder': '输入消息…',

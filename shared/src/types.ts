@@ -3,6 +3,7 @@ export type {
     AgentStateCompletedRequest,
     AgentStateRequest,
     AttachmentMetadata,
+    CodexQuota,
     DecryptedMessage,
     Metadata,
     Machine,
