@@ -16,7 +16,7 @@ function HealthMeterBar(props: {
     layout: 'stack' | 'inline'
     compact?: boolean
 }) {
-    const barWidthClass = props.compact ? 'w-8' : props.layout === 'inline' ? 'w-14' : 'w-11'
+    const barWidthClass = props.compact ? 'w-6' : props.layout === 'inline' ? 'w-14' : 'w-11'
     const labelWidthClass = props.compact ? 'w-5 text-[8px]' : 'w-6 text-[9px]'
 
     return (
@@ -214,7 +214,7 @@ export function MachineHealthIndicator(props: {
             type="button"
             className={cn(
                 'inline-flex rounded-md border',
-                compact ? 'flex-row flex-nowrap items-center gap-x-1.5 px-1 py-0.5' : layout === 'inline'
+                compact ? 'flex-row flex-nowrap items-center gap-x-1 px-1 py-0.5' : layout === 'inline'
                     ? 'flex-row flex-wrap items-center gap-x-3 gap-y-1 px-1.5 py-1'
                     : 'flex-col gap-0.5 px-1.5 py-1',
                 MACHINE_HEALTH_CHIP_CLASS[presentation.overallTone],
