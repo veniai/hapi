@@ -23,6 +23,7 @@ import {
 } from '@hapi/protocol/apiTypes'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import type { RunnerState, Machine, MachineMetadata } from './types'
+import type { CodexQuota } from '@hapi/protocol/types'
 import { RunnerStateSchema, MachineMetadataSchema } from './types'
 import { backoff } from '@/utils/time'
 import { getInvokedCwd } from '@/utils/invokedCwd'
@@ -43,6 +44,7 @@ import { applyVersionedAck } from './versionedUpdate'
 import { archiveLocalCodexSession, listLocalCodexSessionSummaries, listLocalCodexSessionsWithMessagesByIds } from '../modules/common/codexSessions'
 import { buildSocketIoExtraHeaderOptions } from './hubExtraHeaders'
 import { collectMachineHealth } from '@/utils/machineHealth'
+import { fetchCodexQuota } from '@/utils/codexQuota'
 import { inspectCursorChatStore } from '@/cursor/cursorChatStoreStatus'
 import { homedir } from 'node:os'
 import { cleanupWorktreeArchive, inspectWorktreeArchive } from '@/runner/worktree'
@@ -121,6 +123,9 @@ export class ApiMachineClient {
     private socket!: Socket<ServerToClientEvents, ClientToServerEvents>
     private keepAliveInterval: NodeJS.Timeout | null = null
     private keepAliveStartTimeout: ReturnType<typeof setTimeout> | null = null
+    private codexQuotaInterval: NodeJS.Timeout | null = null
+    private codexQuota: CodexQuota | null | undefined
+    private keepAliveActive = false
     private rpcHandlerManager: RpcHandlerManager
 
     private readonly normalizedWorkspaceRoots: string[] | undefined
@@ -651,22 +656,31 @@ export class ApiMachineClient {
     private startKeepAlive(): void {
         this.stopKeepAlive()
         const emitAlive = () => {
+            const health = collectMachineHealth()
             this.socket.emit('machine-alive', {
                 machineId: this.machine.id,
                 time: Date.now(),
-                health: collectMachineHealth()
+                health: this.codexQuota === undefined
+                    ? health
+                    : { ...health, codexQuota: this.codexQuota }
             })
         }
         // Prime CPU sampling so the first heartbeat already includes CPU %.
         collectMachineHealth()
         this.keepAliveStartTimeout = setTimeout(() => {
             this.keepAliveStartTimeout = null
+            this.keepAliveActive = true
             emitAlive()
             this.keepAliveInterval = setInterval(emitAlive, 20_000)
+            void this.refreshCodexQuota(emitAlive)
+            this.codexQuotaInterval = setInterval(() => {
+                void this.refreshCodexQuota(emitAlive)
+            }, 5 * 60_000)
         }, 50)
     }
 
     private stopKeepAlive(): void {
+        this.keepAliveActive = false
         if (this.keepAliveStartTimeout) {
             clearTimeout(this.keepAliveStartTimeout)
             this.keepAliveStartTimeout = null
@@ -675,6 +689,17 @@ export class ApiMachineClient {
             clearInterval(this.keepAliveInterval)
             this.keepAliveInterval = null
         }
+        if (this.codexQuotaInterval) {
+            clearInterval(this.codexQuotaInterval)
+            this.codexQuotaInterval = null
+        }
+    }
+
+    private async refreshCodexQuota(emitAlive: () => void): Promise<void> {
+        const quota = await fetchCodexQuota()
+        if (!this.keepAliveActive) return
+        this.codexQuota = quota ?? undefined
+        emitAlive()
     }
 
     shutdown(): void {

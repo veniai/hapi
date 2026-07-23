@@ -338,13 +338,30 @@ export const RunnerStateSchema = z.object({
 
 export type RunnerState = z.infer<typeof RunnerStateSchema>
 
+const CodexQuotaWindowSchema = z.object({
+    usedPercent: z.number().min(0).max(100),
+    windowSeconds: z.number().positive(),
+    resetAt: z.number().positive(),
+    resetAfterSeconds: z.number().nonnegative()
+}).strict()
+
+export const CodexQuotaSchema = z.object({
+    status: z.enum(['ok', 'error']),
+    collectedAt: z.number(),
+    fiveHour: CodexQuotaWindowSchema.nullable().optional(),
+    weekly: CodexQuotaWindowSchema.nullable().optional()
+}).strict()
+
+export type CodexQuota = z.infer<typeof CodexQuotaSchema>
+
 export const MachineHealthSchema = z.object({
     collectedAt: z.number(),
     cpuCount: z.number().int().positive().optional(),
     load1m: z.number().nonnegative().optional(),
     cpuPercent: z.number().min(0).max(100).optional(),
     memoryPercent: z.number().min(0).max(100).optional(),
-    uptimeSeconds: z.number().nonnegative().optional()
+    uptimeSeconds: z.number().nonnegative().optional(),
+    codexQuota: CodexQuotaSchema.optional()
 }).strict()
 
 export type MachineHealth = z.infer<typeof MachineHealthSchema>

@@ -18,6 +18,19 @@ export type MachineHealthPresentation = {
     status: 'healthy' | 'elevated' | 'high' | 'unknown'
 }
 
+export type CodexQuotaWindowPresentation = {
+    remainingPercent: number
+    resetAt: number
+    tone: MachineHealthTone
+}
+
+export type CodexQuotaPresentation = {
+    status: 'ok' | 'error'
+    nextRefreshAt: number
+    fiveHour: CodexQuotaWindowPresentation | null
+    weekly: CodexQuotaWindowPresentation | null
+}
+
 /** Compact uptime for sidebar tiles, e.g. 1h 54m, 2d 4h, 5m. */
 export function formatMachineUptimeSeconds(totalSeconds: number): string | null {
     if (!Number.isFinite(totalSeconds) || totalSeconds < 0) {
@@ -60,6 +73,33 @@ function percentTone(value: number): MachineHealthTone {
     if (value >= 90) return 'critical'
     if (value >= 75) return 'warn'
     return 'ok'
+}
+
+function quotaTone(usedPercent: number): MachineHealthTone {
+    return percentTone(usedPercent)
+}
+
+function presentQuotaWindow(
+    window: NonNullable<NonNullable<MachineHealth>['codexQuota']>['fiveHour']
+): CodexQuotaWindowPresentation | null {
+    if (!window) return null
+    return {
+        remainingPercent: Math.max(0, Math.min(100, Math.round(100 - window.usedPercent))),
+        resetAt: window.resetAt,
+        tone: quotaTone(window.usedPercent)
+    }
+}
+
+export function presentCodexQuota(
+    quota: MachineHealth['codexQuota'] | null | undefined
+): CodexQuotaPresentation | null {
+    if (!quota) return null
+    return {
+        status: quota.status,
+        nextRefreshAt: quota.collectedAt + 5 * 60_000,
+        fiveHour: presentQuotaWindow(quota.fiveHour),
+        weekly: presentQuotaWindow(quota.weekly)
+    }
 }
 
 function worstTone(...tones: MachineHealthTone[]): MachineHealthTone {

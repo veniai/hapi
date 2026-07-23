@@ -28,7 +28,7 @@ import { getCodexImportedAt, subscribeCodexImportedSessions } from '@/lib/codexI
 import { formatReopenError } from '@/lib/reopenError'
 import { getSessionTitle } from '@/lib/sessionTitle'
 import type { Machine } from '@/types/api'
-import { getMachinePlatform, presentMachineHealth } from '@/lib/machineHealth'
+import { getMachinePlatform, presentCodexQuota, presentMachineHealth } from '@/lib/machineHealth'
 import { MachineGroupHeader } from '@/components/MachineGroupHeader'
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
 
@@ -1137,6 +1137,7 @@ export function SessionList(props: {
                         machine?.health,
                         getMachinePlatform(machine)
                     )
+                    const quotaPresentation = presentCodexQuota(machine?.health?.codexQuota)
                     return (
                         <div key={mg.machineId ?? UNKNOWN_MACHINE_ID}>
                             <MachineGroupHeader
@@ -1146,6 +1147,7 @@ export function SessionList(props: {
                                 onToggle={() => toggleMachine(mg)}
                                 machine={machine}
                                 healthPresentation={healthPresentation}
+                                quotaPresentation={quotaPresentation}
                             />
 
                             {/* Level 2: Projects */}
