@@ -146,6 +146,7 @@ function AppInner() {
     const isFirstConnectRef = useRef(true)
     const baseUrlRef = useRef(baseUrl)
     const pushPromptedRef = useRef(false)
+    const authSourceRef = useRef(authSource)
     const { isSupported: isPushSupported, permission: pushPermission, requestPermission, subscribe } = usePushNotifications(api)
 
     useEffect(() => {
@@ -157,6 +158,17 @@ function AppInner() {
         syncTokenRef.current = 0
         queryClient.clear()
     }, [baseUrl, queryClient])
+
+    useEffect(() => {
+        if (authSourceRef.current === authSource) {
+            return
+        }
+        authSourceRef.current = authSource
+        // A new login source can represent a different namespace on the same
+        // hub. Token refresh keeps the source stable, so it does not clear the
+        // active query cache or cause avoidable reloads.
+        queryClient.clear()
+    }, [authSource, queryClient])
 
     // Clean up URL params after successful auth (for direct access links)
     useEffect(() => {
