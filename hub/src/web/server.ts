@@ -206,24 +206,6 @@ function serveEmbeddedAsset(asset: EmbeddedWebAsset): Response {
     })
 }
 
-function applyDynamicApiCacheHeaders(response: Response): Response {
-    const cacheControl = response.headers.get('Cache-Control')
-    if (cacheControl?.includes('immutable')) {
-        return response
-    }
-
-    const headers = new Headers(response.headers)
-    headers.set('Cache-Control', 'no-store, private')
-    headers.set('CDN-Cache-Control', 'no-store')
-    headers.set('Cloudflare-CDN-Cache-Control', 'no-store')
-
-    return new Response(response.body, {
-        status: response.status,
-        statusText: response.statusText,
-        headers
-    })
-}
-
 function createWebApp(options: {
     getSyncEngine: () => SyncEngine | null
     getSseManager: () => SSEManager | null
@@ -251,16 +233,21 @@ function createWebApp(options: {
         allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
         allowHeaders: ['authorization', 'content-type']
     })
-    app.use('/api/*', corsMiddleware)
-    app.use('/cli/*', corsMiddleware)
 
     // Authenticated API responses are user/namespace-scoped and must never be
     // reused by browser, service-worker, or CDN caches. Immutable generated
     // images opt out below via their explicit `immutable` cache policy.
     app.use('/api/*', async (c, next) => {
         await next()
-        return applyDynamicApiCacheHeaders(c.res)
+        if (c.res.headers.get('Cache-Control')?.includes('immutable')) {
+            return
+        }
+        c.header('Cache-Control', 'no-store, private')
+        c.header('CDN-Cache-Control', 'no-store')
+        c.header('Cloudflare-CDN-Cache-Control', 'no-store')
     })
+    app.use('/api/*', corsMiddleware)
+    app.use('/cli/*', corsMiddleware)
 
     app.route('/cli', createCliRoutes(options.getSyncEngine))
 
