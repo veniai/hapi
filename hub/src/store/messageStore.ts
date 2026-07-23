@@ -42,8 +42,8 @@ export class MessageStore {
     }
 
     /** Full-text search over message content (multi-agent-blackboard #3). */
-    searchMessages(namespace: string, path: string, query: string, limit: number = 20): SearchHit[] {
-        return searchMessagesFn(this.db, namespace, path, query, limit)
+    searchMessages(namespace: string, workspacePath: string, query: string, limit: number = 20, excludeSessionId?: string): SearchHit[] {
+        return searchMessagesFn(this.db, namespace, workspacePath, query, limit, excludeSessionId)
     }
 
     copyMessageToSession(

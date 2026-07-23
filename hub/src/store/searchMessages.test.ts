@@ -3,16 +3,33 @@ import { Database } from 'bun:sqlite'
 import { Store } from './index'
 import { searchMessages } from './searchMessages'
 
-describe('searchMessages (FTS5, namespace + path scoped)', () => {
+describe('searchMessages (FTS5, namespace + workspace scoped)', () => {
     it('matches message content and ranks by bm25 (more hits → more relevant)', () => {
         const store = new Store(':memory:')
         const db = (store as any).db as Database
-        seedSession(db, 's1', 'ns1', '/p')
+        seedSession(db, 's1', 'ns1', '/p', undefined, undefined, 'Button sizing')
         insertMsg(db, 'm1', 's1', 'alpha beta', 1)
         insertMsg(db, 'm2', 's1', 'alpha alpha gamma', 2)
         const hits = searchMessages(db, 'ns1', '/p', 'alpha')
         expect(hits.length).toBe(2)
         expect(hits[0].messageId).toBe('m2') // alpha appears twice → more relevant
+        expect(hits[0].sessionName).toBe('Button sizing')
+        store.close()
+    })
+
+    it('falls back from session name to summary, worktree name, then path', () => {
+        const store = new Store(':memory:')
+        const db = (store as any).db as Database
+        seedSession(db, 'summary', 'ns1', '/summary', undefined, undefined, undefined, 'Summary title')
+        insertMsg(db, 'm-summary', 'summary', 'fallback summary', 1)
+        seedSession(db, 'worktree', 'ns1', '/worktree', undefined, '/worktree', undefined, undefined, 'send')
+        insertMsg(db, 'm-worktree', 'worktree', 'fallback worktree', 1)
+        seedSession(db, 'path', 'ns1', '/path')
+        insertMsg(db, 'm-path', 'path', 'fallback path', 1)
+
+        expect(searchMessages(db, 'ns1', '/summary', 'fallback')[0].sessionName).toBe('Summary title')
+        expect(searchMessages(db, 'ns1', '/worktree', 'fallback')[0].sessionName).toBe('send')
+        expect(searchMessages(db, 'ns1', '/path', 'fallback')[0].sessionName).toBe('/path')
         store.close()
     })
 
@@ -43,6 +60,32 @@ describe('searchMessages (FTS5, namespace + path scoped)', () => {
         store.close()
     })
 
+    it('groups HAPI worktrees by workspacePath', () => {
+        const store = new Store(':memory:')
+        const db = (store as any).db as Database
+        seedSession(db, 's1', 'ns1', '/worktrees/one', '/repo')
+        insertMsg(db, 'm1', 's1', 'shared workspace result', 1)
+        seedSession(db, 's2', 'ns1', '/worktrees/two', undefined, '/repo')
+        insertMsg(db, 'm2', 's2', 'shared workspace result', 1)
+
+        const hits = searchMessages(db, 'ns1', '/repo', 'workspace')
+        expect(hits.map((hit) => hit.sessionId)).toEqual(['s1', 's2'])
+        store.close()
+    })
+
+    it('excludes the session that issued the search', () => {
+        const store = new Store(':memory:')
+        const db = (store as any).db as Database
+        seedSession(db, 'current', 'ns1', '/p', '/repo')
+        insertMsg(db, 'm1', 'current', 'shared workspace result', 1)
+        seedSession(db, 'sibling', 'ns1', '/other', '/repo')
+        insertMsg(db, 'm2', 'sibling', 'shared workspace result', 1)
+
+        const hits = searchMessages(db, 'ns1', '/repo', 'workspace', 20, 'current')
+        expect(hits.map((hit) => hit.sessionId)).toEqual(['sibling'])
+        store.close()
+    })
+
     it('empty result for a term that does not occur', () => {
         const store = new Store(':memory:')
         const db = (store as any).db as Database
@@ -64,9 +107,25 @@ describe('searchMessages (FTS5, namespace + path scoped)', () => {
     })
 })
 
-function seedSession(db: Database, id: string, namespace: string, path: string): void {
+function seedSession(
+    db: Database,
+    id: string,
+    namespace: string,
+    path: string,
+    workspacePath?: string,
+    worktreeBasePath?: string,
+    name?: string,
+    summary?: string,
+    worktreeName?: string
+): void {
     db.prepare('INSERT INTO sessions (id, namespace, created_at, updated_at, metadata) VALUES (?,?,?,?,?)')
-        .run(id, namespace, 1, 1, JSON.stringify({ path }))
+        .run(id, namespace, 1, 1, JSON.stringify({
+            path,
+            ...(name ? { name } : {}),
+            ...(summary ? { summary: { text: summary, updatedAt: 1 } } : {}),
+            ...(workspacePath ? { workspacePath } : {}),
+            ...(worktreeBasePath ? { worktree: { basePath: worktreeBasePath, name: worktreeName ?? 'worktree' } } : {})
+        }))
 }
 
 function insertMsg(db: Database, id: string, sid: string, text: string, seq: number): void {

@@ -56,6 +56,15 @@ function resolveMachineForNamespace(
     return { ok: false, status: 404, error: 'Machine not found' }
 }
 
+function buildSessionUrl(baseUrl: string, sessionId: string): string {
+    try {
+        return new URL(`/sessions/${encodeURIComponent(sessionId)}`, baseUrl).toString()
+    } catch {
+        const normalized = baseUrl.replace(/\/+$/, '')
+        return `${normalized}/sessions/${encodeURIComponent(sessionId)}`
+    }
+}
+
 export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<CliEnv> {
     const app = new Hono<CliEnv>()
 
@@ -91,12 +100,20 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
         const namespace = c.get('namespace')
         const q = (c.req.query('q') ?? '').trim()
         const path = (c.req.query('path') ?? '').trim()
+        const sessionId = (c.req.query('sessionId') ?? '').trim() || undefined
         const limit = Math.min(parseInt(c.req.query('limit') ?? '20', 10) || 20, 50)
         if (!q || !path) {
             return c.json({ error: 'q and path are required' }, 400)
         }
         try {
-            return c.json({ hits: engine.searchMessages(namespace, path, q, limit) })
+            const hits = engine.searchMessages(namespace, path, q, limit, sessionId)
+            const publicUrl = getConfiguration().publicUrl
+            return c.json({
+                hits: hits.map((hit) => ({
+                    ...hit,
+                    sessionUrl: buildSessionUrl(publicUrl, hit.sessionId)
+                }))
+            })
         } catch {
             // FTS5 MATCH syntax error → empty, not 500.
             return c.json({ hits: [] })
