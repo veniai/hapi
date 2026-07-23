@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type PreviewServer } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 import { readFileSync } from 'node:fs'
@@ -44,6 +44,23 @@ function getVendorChunkName(id: string): string | undefined {
     }
 
     return undefined
+}
+
+function noCacheServiceWorkerOnPreview() {
+    return {
+        name: 'hapi-preview-service-worker-headers',
+        configurePreviewServer(server: PreviewServer) {
+            server.middlewares.use((req, res, next) => {
+                const pathname = req.url?.split('?')[0]
+                if (pathname === '/sw.js' || pathname?.endsWith('/sw.js')) {
+                    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
+                    res.setHeader('CDN-Cache-Control', 'no-store')
+                    res.setHeader('Cloudflare-CDN-Cache-Control', 'no-store')
+                }
+                next()
+            })
+        }
+    }
 }
 
 export default defineConfig({
@@ -142,7 +159,8 @@ export default defineConfig({
                 enabled: true,
                 type: 'module'
             }
-        })
+        }),
+        noCacheServiceWorkerOnPreview()
     ],
     base,
     resolve: {

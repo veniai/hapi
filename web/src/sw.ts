@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 import { precacheAndRoute } from 'workbox-precaching'
 import { registerRoute } from 'workbox-routing'
-import { CacheFirst, NetworkFirst } from 'workbox-strategies'
+import { CacheFirst } from 'workbox-strategies'
 import { ExpirationPlugin } from 'workbox-expiration'
 import {
     cleanupExpiredShareTransfers,
@@ -11,6 +11,7 @@ import {
 import { shareTargetPathname } from './lib/sharePath'
 
 const sharePath = shareTargetPathname()
+const LEGACY_API_CACHE_NAMES = ['api-sessions', 'api-session-detail', 'api-machines']
 
 declare const self: ServiceWorkerGlobalScope & {
     __WB_MANIFEST: Array<string | { url: string; revision?: string }>
@@ -30,48 +31,6 @@ type PushPayload = {
 }
 
 precacheAndRoute(self.__WB_MANIFEST)
-
-registerRoute(
-    ({ url }) => url.pathname === '/api/sessions',
-    new NetworkFirst({
-        cacheName: 'api-sessions',
-        networkTimeoutSeconds: 2,
-        plugins: [
-            new ExpirationPlugin({
-                maxEntries: 10,
-                maxAgeSeconds: 60 * 5
-            })
-        ]
-    })
-)
-
-registerRoute(
-    ({ url }) => /^\/api\/sessions\/[^/]+$/.test(url.pathname),
-    new NetworkFirst({
-        cacheName: 'api-session-detail',
-        networkTimeoutSeconds: 2,
-        plugins: [
-            new ExpirationPlugin({
-                maxEntries: 20,
-                maxAgeSeconds: 60 * 5
-            })
-        ]
-    })
-)
-
-registerRoute(
-    ({ url }) => url.pathname === '/api/machines',
-    new NetworkFirst({
-        cacheName: 'api-machines',
-        networkTimeoutSeconds: 2,
-        plugins: [
-            new ExpirationPlugin({
-                maxEntries: 5,
-                maxAgeSeconds: 60 * 10
-            })
-        ]
-    })
-)
 
 registerRoute(
     /^https:\/\/cdn\.socket\.io\/.*/,
@@ -106,7 +65,16 @@ self.addEventListener('message', (event) => {
 })
 
 self.addEventListener('activate', (event) => {
-    event.waitUntil(self.clients.claim())
+    event.waitUntil(
+        Promise.all([
+            self.clients.claim(),
+            caches.keys().then((cacheNames) => Promise.all(
+                cacheNames
+                    .filter((cacheName) => LEGACY_API_CACHE_NAMES.includes(cacheName))
+                    .map((cacheName) => caches.delete(cacheName))
+            ))
+        ])
+    )
 })
 
 self.addEventListener('push', (event) => {
