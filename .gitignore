@@ -50,3 +50,11 @@ e2e-output/
 .xyz-harness
 .agents/
 .pi/
+
+# Private fork artifacts — local-only, not for distribution
+/AGENTS.md
+/CLAUDE.md
+/.cortex/project.md
+/scripts/deploy.sh
+/doc/spec/
+/doc/research/
