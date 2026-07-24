@@ -126,7 +126,7 @@ describe('startHappyServer skill_lookup', () => {
                     messageId: 'message-1',
                     sessionId: 'sibling-session',
                     sessionName: '调整发送按钮尺寸',
-                    sessionUrl: 'https://hapi.zhetengde.xyz/sessions/sibling-session',
+                    sessionUrl: 'https://hapi.example.com/sessions/sibling-session',
                     seq: 369,
                     path: workingDirectory,
                     contentSnippet: 'h-[50px] w-[50px]'
@@ -162,7 +162,7 @@ describe('startHappyServer skill_lookup', () => {
         }) as ToolResult
         expect(result.content?.[0]?.text).toContain('调整发送按钮尺寸')
         expect(result.content?.[0]?.text).toContain('sibling-session')
-        expect(result.content?.[0]?.text).toContain('(https://hapi.zhetengde.xyz/sessions/sibling-session)')
+        expect(result.content?.[0]?.text).toContain('(https://hapi.example.com/sessions/sibling-session)')
 
         const searchCalls = fetchMock.mock.calls.filter(([input]) => {
             const requestUrl = typeof input === 'string'
