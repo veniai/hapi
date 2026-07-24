@@ -5,7 +5,7 @@ import { MACHINE_HEALTH_BAR_FILL_CLASS, MACHINE_HEALTH_CHIP_CLASS } from '@/lib/
 import { cn } from '@/lib/utils'
 import { useTranslation } from '@/lib/use-translation'
 
-function QuotaBar(props: { label: string; window: CodexQuotaWindowPresentation | null }) {
+function QuotaBar(props: { label: string; percent: number | null; tone: CodexQuotaWindowPresentation['tone'] }) {
     return (
         <span className="inline-flex items-center gap-0.5">
             <span className="w-5 shrink-0 text-[8px] font-semibold uppercase tracking-wide text-[var(--app-hint)]">
@@ -15,11 +15,11 @@ function QuotaBar(props: { label: string; window: CodexQuotaWindowPresentation |
                 <span
                     className={cn(
                         'block h-full rounded-full',
-                        MACHINE_HEALTH_BAR_FILL_CLASS[props.window?.tone ?? 'unknown']
+                        MACHINE_HEALTH_BAR_FILL_CLASS[props.tone]
                     )}
-                    style={{ width: `${props.window?.remainingPercent ?? 0}%` }}
+                    style={{ width: `${props.percent ?? 0}%` }}
                 />
-                {!props.window ? (
+                {props.percent === null ? (
                     <span className="absolute inset-0 text-center text-[8px] leading-[6px] text-[var(--app-hint)]">—</span>
                 ) : null}
             </span>
@@ -36,6 +36,16 @@ function formatResetAt(timestampSeconds: number): string {
     }).format(new Date(timestampSeconds * 1000))
 }
 
+function formatCountdown(seconds: number): string {
+    const totalMinutes = Math.max(0, Math.ceil(seconds / 60))
+    const days = Math.floor(totalMinutes / (24 * 60))
+    const hours = Math.floor((totalMinutes % (24 * 60)) / 60)
+    const minutes = totalMinutes % 60
+    if (days > 0) return `${days}d ${hours}h`
+    if (hours > 0) return `${hours}h ${minutes}m`
+    return `${minutes}m`
+}
+
 export function CodexQuotaIndicator(props: {
     presentation: CodexQuotaPresentation
     className?: string
@@ -45,11 +55,22 @@ export function CodexQuotaIndicator(props: {
     const [clickOpen, setClickOpen] = useState(false)
     const containerRef = useRef<HTMLSpanElement>(null)
     const { presentation } = props
+    const [now, setNow] = useState(() => Date.now())
+    const weekly = presentation.weekly
+    useEffect(() => {
+        if (!weekly) return
+        const timer = window.setInterval(() => setNow(Date.now()), 60_000)
+        return () => window.clearInterval(timer)
+    }, [weekly?.resetAt])
+    const resetSeconds = weekly ? Math.max(0, weekly.resetAt - now / 1000) : null
+    const resetPercent = weekly && resetSeconds !== null
+        ? Math.max(0, Math.min(100, resetSeconds / weekly.windowSeconds * 100))
+        : null
     const overallTone = presentation.status === 'error'
         ? 'unknown'
-        : presentation.fiveHour?.tone === 'critical' || presentation.weekly?.tone === 'critical'
+        : presentation.weekly?.tone === 'critical'
             ? 'critical'
-            : presentation.fiveHour?.tone === 'warn' || presentation.weekly?.tone === 'warn'
+            : presentation.weekly?.tone === 'warn'
                 ? 'warn'
                 : 'ok'
 
@@ -65,8 +86,9 @@ export function CodexQuotaIndicator(props: {
     const ariaLabel = presentation.status === 'error'
         ? t('machine.quota.aria.error')
         : t('machine.quota.aria.summary', {
-            fiveHour: presentation.fiveHour?.remainingPercent ?? '—',
-            weekly: presentation.weekly?.remainingPercent ?? '—'
+            weekly: presentation.weekly?.remainingPercent ?? '—',
+            reset: resetSeconds === null ? '—' : formatCountdown(resetSeconds),
+            resets: presentation.resetCredits?.availableCount ?? '—'
         })
 
     const chip = (
@@ -93,8 +115,8 @@ export function CodexQuotaIndicator(props: {
                 <span className="text-[10px] text-[var(--app-hint)]">{t('machine.quota.queryFailedShort')}</span>
             ) : (
                 <>
-                    <QuotaBar label="5H" window={presentation.fiveHour} />
-                    <QuotaBar label="W" window={presentation.weekly} />
+                    <QuotaBar label="W" percent={presentation.weekly?.remainingPercent ?? null} tone={presentation.weekly?.tone ?? 'unknown'} />
+                    <QuotaBar label="R" percent={resetPercent} tone="ok" />
                 </>
             )}
         </button>
@@ -118,27 +140,35 @@ export function CodexQuotaIndicator(props: {
                 ) : (
                     <>
                         <span className="flex justify-between gap-3">
-                            <span className="text-[var(--app-hint)]">{t('machine.quota.fiveHour')}</span>
+                            <span className="text-[var(--app-hint)]">{t('machine.quota.weekly')}</span>
                             <span className="font-semibold tabular-nums text-[var(--app-fg)]">
-                                {presentation.fiveHour ? `${presentation.fiveHour.remainingPercent}%` : '—'}
+                                {weekly ? `${weekly.remainingPercent}%` : '—'}
                             </span>
                         </span>
-                        {presentation.fiveHour ? (
+                        {weekly ? (
+                            <span className="flex justify-between gap-3 text-[var(--app-hint)]">
+                                <span>{t('machine.quota.resetCountdown')}</span>
+                                <span>{resetSeconds === null ? '—' : formatCountdown(resetSeconds)}</span>
+                            </span>
+                        ) : null}
+                        {weekly ? (
                             <span className="flex justify-between gap-3 text-[var(--app-hint)]">
                                 <span>{t('machine.quota.reset')}</span>
-                                <span>{formatResetAt(presentation.fiveHour.resetAt)}</span>
+                                <span>{formatResetAt(weekly.resetAt)}</span>
                             </span>
                         ) : null}
                         <span className="flex justify-between gap-3">
-                            <span className="text-[var(--app-hint)]">{t('machine.quota.weekly')}</span>
+                            <span className="text-[var(--app-hint)]">{t('machine.quota.resetCredits')}</span>
                             <span className="font-semibold tabular-nums text-[var(--app-fg)]">
-                                {presentation.weekly ? `${presentation.weekly.remainingPercent}%` : '—'}
+                                {presentation.resetCredits?.status === 'ok'
+                                    ? `${presentation.resetCredits.availableCount ?? 0}`
+                                    : '—'}
                             </span>
                         </span>
-                        {presentation.weekly ? (
+                        {presentation.resetCredits?.status === 'ok' && presentation.resetCredits.nextExpiresAt ? (
                             <span className="flex justify-between gap-3 text-[var(--app-hint)]">
-                                <span>{t('machine.quota.reset')}</span>
-                                <span>{formatResetAt(presentation.weekly.resetAt)}</span>
+                                <span>{t('machine.quota.nextResetExpiry')}</span>
+                                <span>{formatResetAt(presentation.resetCredits.nextExpiresAt / 1000)}</span>
                             </span>
                         ) : null}
                     </>

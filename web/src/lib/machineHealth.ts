@@ -21,13 +21,21 @@ export type MachineHealthPresentation = {
 export type CodexQuotaWindowPresentation = {
     remainingPercent: number
     resetAt: number
+    windowSeconds: number
     tone: MachineHealthTone
+}
+
+export type CodexResetCreditsPresentation = {
+    status: 'ok' | 'error'
+    availableCount: number | null
+    totalEarnedCount: number | null
+    nextExpiresAt: number | null
 }
 
 export type CodexQuotaPresentation = {
     status: 'ok' | 'error'
-    fiveHour: CodexQuotaWindowPresentation | null
     weekly: CodexQuotaWindowPresentation | null
+    resetCredits: CodexResetCreditsPresentation | null
 }
 
 /** Compact uptime for sidebar tiles, e.g. 1h 54m, 2d 4h, 5m. */
@@ -79,12 +87,13 @@ function quotaTone(usedPercent: number): MachineHealthTone {
 }
 
 function presentQuotaWindow(
-    window: NonNullable<NonNullable<MachineHealth>['codexQuota']>['fiveHour']
+    window: NonNullable<NonNullable<MachineHealth>['codexQuota']>['weekly']
 ): CodexQuotaWindowPresentation | null {
     if (!window) return null
     return {
         remainingPercent: Math.max(0, Math.min(100, Math.round(100 - window.usedPercent))),
         resetAt: window.resetAt,
+        windowSeconds: window.windowSeconds,
         tone: quotaTone(window.usedPercent)
     }
 }
@@ -95,8 +104,13 @@ export function presentCodexQuota(
     if (!quota) return null
     return {
         status: quota.status,
-        fiveHour: presentQuotaWindow(quota.fiveHour),
-        weekly: presentQuotaWindow(quota.weekly)
+        weekly: presentQuotaWindow(quota.weekly),
+        resetCredits: quota.resetCredits ? {
+            status: quota.resetCredits.status,
+            availableCount: quota.resetCredits.availableCount ?? null,
+            totalEarnedCount: quota.resetCredits.totalEarnedCount ?? null,
+            nextExpiresAt: quota.resetCredits.nextExpiresAt ?? null
+        } : null
     }
 }
 

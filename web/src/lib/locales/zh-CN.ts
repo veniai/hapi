@@ -297,11 +297,13 @@ export default {
   'machine.quota.tooltip.title': 'Codex 额度',
   'machine.quota.tooltip.queryFailed': '额度查询失败，不显示上一次结果。',
   'machine.quota.queryFailedShort': '额度查询失败',
-  'machine.quota.fiveHour': '5 小时剩余',
   'machine.quota.weekly': '周额度剩余',
   'machine.quota.reset': '重置时间',
+  'machine.quota.resetCountdown': '距离重置',
+  'machine.quota.resetCredits': '重置次数',
+  'machine.quota.nextResetExpiry': '最近过期',
   'machine.quota.aria.error': 'Codex 额度查询失败',
-  'machine.quota.aria.summary': 'Codex 额度：5 小时剩余 {fiveHour}%；周额度剩余 {weekly}%',
+  'machine.quota.aria.summary': 'Codex 额度：周额度剩余 {weekly}%；距离重置 {reset}；可用重置次数 {resets}',
 
   // Chat
   'chat.placeholder': '输入消息…',
