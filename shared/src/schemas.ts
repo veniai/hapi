@@ -351,8 +351,13 @@ const CodexQuotaWindowSchema = z.object({
 export const CodexQuotaSchema = z.object({
     status: z.enum(['ok', 'error']),
     collectedAt: z.number(),
-    fiveHour: CodexQuotaWindowSchema.nullable().optional(),
-    weekly: CodexQuotaWindowSchema.nullable().optional()
+    weekly: CodexQuotaWindowSchema.nullable().optional(),
+    resetCredits: z.object({
+        status: z.enum(['ok', 'error']),
+        availableCount: z.number().int().nonnegative().optional(),
+        totalEarnedCount: z.number().int().nonnegative().optional(),
+        nextExpiresAt: z.number().positive().nullable().optional()
+    }).strict().optional()
 }).strict()
 
 export type CodexQuota = z.infer<typeof CodexQuotaSchema>

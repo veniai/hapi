@@ -12,27 +12,32 @@ describe('presentMachineHealth', () => {
         const result = presentCodexQuota({
             status: 'ok',
             collectedAt: 1,
-            fiveHour: {
+            weekly: {
                 usedPercent: 18,
                 windowSeconds: 18_000,
                 resetAt: 100,
                 resetAfterSeconds: 50
             },
-            weekly: null
+            resetCredits: {
+                status: 'ok',
+                availableCount: 0,
+                totalEarnedCount: 0,
+                nextExpiresAt: null
+            }
         })
 
         expect(result).toEqual({
             status: 'ok',
-            fiveHour: { remainingPercent: 82, resetAt: 100, tone: 'ok' },
-            weekly: null
+            weekly: { remainingPercent: 82, resetAt: 100, windowSeconds: 18000, tone: 'ok' },
+            resetCredits: { status: 'ok', availableCount: 0, totalEarnedCount: 0, nextExpiresAt: null }
         })
     })
 
     it('keeps quota query failures explicit without a previous window', () => {
         expect(presentCodexQuota({ status: 'error', collectedAt: 1 })).toEqual({
             status: 'error',
-            fiveHour: null,
-            weekly: null
+            weekly: null,
+            resetCredits: null
         })
     })
 

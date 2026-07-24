@@ -293,11 +293,13 @@ export default {
   'machine.quota.tooltip.title': 'Codex quota',
   'machine.quota.tooltip.queryFailed': 'Quota query failed; no previous result is shown.',
   'machine.quota.queryFailedShort': 'Quota query failed',
-  'machine.quota.fiveHour': '5-hour remaining',
   'machine.quota.weekly': 'Weekly remaining',
   'machine.quota.reset': 'Resets',
+  'machine.quota.resetCountdown': 'Resets in',
+  'machine.quota.resetCredits': 'Reset credits',
+  'machine.quota.nextResetExpiry': 'Next expiry',
   'machine.quota.aria.error': 'Codex quota query failed',
-  'machine.quota.aria.summary': 'Codex quota: 5-hour {fiveHour} percent remaining; weekly {weekly} percent remaining',
+  'machine.quota.aria.summary': 'Codex quota: weekly {weekly} percent remaining; resets in {reset}; {resets} reset credits available',
 
   // Chat
   'chat.placeholder': 'Type a message…',

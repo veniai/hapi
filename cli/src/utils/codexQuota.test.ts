@@ -14,44 +14,50 @@ describe('fetchCodexQuota', () => {
         globalThis.fetch = originalFetch
     })
 
-    it('classifies quota windows by duration instead of primary/secondary position', async () => {
+    it('keeps the weekly window and reads reset credits', async () => {
         const codexHome = await mkdtemp(join(tmpdir(), 'hapi-codex-quota-'))
         process.env.CODEX_HOME = codexHome
         await writeFile(join(codexHome, 'auth.json'), JSON.stringify({
             auth_mode: 'chatgpt',
             tokens: { access_token: 'access-token', account_id: 'account-id' }
         }))
-        globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-            rate_limit: {
-                primary_window: {
-                    used_percent: 7,
-                    limit_window_seconds: 604800,
-                    reset_after_seconds: 100,
-                    reset_at: 200
-                },
-                secondary_window: {
-                    used_percent: 12,
-                    limit_window_seconds: 18000,
-                    reset_after_seconds: 300,
-                    reset_at: 400
+        globalThis.fetch = vi.fn()
+            .mockResolvedValueOnce(new Response(JSON.stringify({
+                rate_limit: {
+                    primary_window: {
+                        used_percent: 7,
+                        limit_window_seconds: 604800,
+                        reset_after_seconds: 100,
+                        reset_at: 200
+                    },
+                    secondary_window: {
+                        used_percent: 12,
+                        limit_window_seconds: 18000,
+                        reset_after_seconds: 300,
+                        reset_at: 400
+                    }
                 }
-            }
-        }), { status: 200 })) as unknown as typeof fetch
+            }), { status: 200 }))
+            .mockResolvedValueOnce(new Response(JSON.stringify({
+                available_count: 2,
+                total_earned_count: 3,
+                credits: [{ status: 'available', expires_at: '2026-07-30T00:00:00Z' }]
+            }), { status: 200 })) as unknown as typeof fetch
 
         await expect(fetchCodexQuota(123)).resolves.toEqual({
             status: 'ok',
             collectedAt: 123,
-            fiveHour: {
-                usedPercent: 12,
-                windowSeconds: 18000,
-                resetAt: 400,
-                resetAfterSeconds: 300
-            },
             weekly: {
                 usedPercent: 7,
                 windowSeconds: 604800,
                 resetAt: 200,
                 resetAfterSeconds: 100
+            },
+            resetCredits: {
+                status: 'ok',
+                availableCount: 2,
+                totalEarnedCount: 3,
+                nextExpiresAt: Date.parse('2026-07-30T00:00:00Z')
             }
         })
 
@@ -61,6 +67,16 @@ describe('fetchCodexQuota', () => {
                 headers: expect.objectContaining({
                     Authorization: 'Bearer access-token',
                     'Chatgpt-Account-Id': 'account-id'
+                })
+            })
+        )
+        expect(fetch).toHaveBeenCalledWith(
+            'https://chatgpt.com/backend-api/wham/rate-limit-reset-credits',
+            expect.objectContaining({
+                headers: expect.objectContaining({
+                    Authorization: 'Bearer access-token',
+                    'OpenAI-Beta': 'codex-1',
+                    originator: 'Codex Desktop'
                 })
             })
         )
